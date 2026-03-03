@@ -1,0 +1,21 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <!-- Adres API: pusty = ten sam origin (gdy frontend z backendu), inaczej np. http://localhost:8080 -->
+  <meta name="api-base" content="" />
+  <title>FM Game</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = { darkMode: 'class' };
+  </script>
+  <style>
+    .pitch-aspect { aspect-ratio: 105/68; max-height: 320px; }
+  </style>
+</head>
+<body class="dark">
+  <div id="app"></div>
+  <script src="./target/scala-3.3.3/fm-game-frontend-fastopt/main.js"></script>
+</body>
+</html>

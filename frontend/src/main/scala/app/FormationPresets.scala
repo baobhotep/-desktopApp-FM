@@ -3,7 +3,7 @@ package app
 /** Presety formacji: nazwa → lista 11 slotów (kolejność zgodna z silnikiem). */
 object FormationPresets {
   /** 4-3-3: GK, obrona 4, pomoc 3, atak 3. */
-  val Formation433: (String, List[String]) = ("4-3-3", List("GK", "LB", "CB", "RB", "LCM", "CDM", "RCM", "LW", "RW", "ST", "ST"))
+  val Formation433: (String, List[String]) = ("4-3-3", List("GK", "LB", "LCB", "RCB", "RB", "LCM", "CDM", "RCM", "LW", "RW", "ST"))
   /** 4-4-2: GK, obrona 4, pomoc 4, dwóch napastników. */
   val Formation442: (String, List[String]) = ("4-4-2", List("GK", "LB", "CB", "CB", "RB", "LM", "LCM", "RCM", "RM", "ST", "ST"))
   /** 4-2-3-1: GK, obrona 4, dwóch defensywnych, trójka ofensywnych, jeden ST. */
@@ -19,9 +19,9 @@ object FormationPresets {
 
   /** Pozycje domyślne 4-3-3 (x, y w 0–1): zgodne z backendem PositionGenerator.formation433. */
   val DefaultPositions433: List[(Double, Double)] = List(
-    (0.04, 0.5), (0.18, 0.22), (0.18, 0.5), (0.18, 0.78),
-    (0.35, 0.35), (0.35, 0.5), (0.35, 0.65),
-    (0.55, 0.22), (0.55, 0.78), (0.55, 0.5), (0.55, 0.5)
+    (0.04, 0.5), (0.18, 0.15), (0.18, 0.38), (0.18, 0.62), (0.18, 0.85),
+    (0.35, 0.30), (0.35, 0.50), (0.35, 0.70),
+    (0.55, 0.20), (0.55, 0.80), (0.65, 0.50)
   )
 }
 

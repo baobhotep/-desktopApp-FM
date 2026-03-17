@@ -74,7 +74,7 @@ object MatchSummaryAggregator {
         case "Pass" | "LongPass" =>
           passesTotal = add(passesTotal, tid)
           if (e.outcome.contains("Success")) passesCompleted = add(passesCompleted, tid)
-          if (zone >= 9) { if (isHome(tid)) passesInFinalThirdH += 1 else if (isAway(tid)) passesInFinalThirdA += 1 }
+          if (zone >= 1 && fmgame.backend.engine.PitchModel.isAttackingThird(zone, isHome(tid))) { if (isHome(tid)) passesInFinalThirdH += 1 else if (isAway(tid)) passesInFinalThirdA += 1 }
           if (e.eventType == "LongPass") {
             longBallsTotal = add(longBallsTotal, tid)
             if (e.outcome.contains("Success")) longBallsSuccessful = add(longBallsSuccessful, tid)

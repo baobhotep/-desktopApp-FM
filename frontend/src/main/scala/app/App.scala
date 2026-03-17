@@ -10,12 +10,9 @@ object AppState {
   val token: Var[Option[String]] = Var(None)
   val currentUser: Var[Option[UserDto]] = Var(None)
   val apiBaseUrl: Var[String] = Var("http://localhost:8080")
-  val selectedLeagueId: Var[Option[String]] = Var(None)
-  val selectedTeamId: Var[Option[String]] = Var(None)
-  val selectedMatchId: Var[Option[String]] = Var(None)
   val invitationToken: Var[Option[String]] = Var(None)
-  /** (matchId, teamId) when set show MatchSquadPage */
-  val lineupContext: Var[Option[(String, String)]] = Var(None)
+  /** Current page for logged-in navigation. Replaces tuple-based selectedLeagueId/selectedTeamId/selectedMatchId/lineupContext. */
+  val currentPage: Var[Page] = Var(Page.Dashboard)
   /** Czy użytkownik już widział tour (odczyt z localStorage przy starcie). */
   val tourSeen: Var[Boolean] = Var(Option(dom.window.localStorage.getItem("fm_tour_seen")).contains("1"))
 }
@@ -32,7 +29,6 @@ object App {
     runFuture(future)(cb)
 
   val rootElement: Element = {
-    val showLogin = Var(true)
     val tourStep = Var(0)
     val tourSteps = List(
       "1. Utwórz ligę (Dashboard → Nowa liga).",
@@ -46,50 +42,50 @@ object App {
         val target = dom.document.activeElement
         val isInput = target != null && (target.tagName == "INPUT" || target.tagName == "TEXTAREA" || target.tagName == "SELECT")
         if (!isInput) {
-          AppState.lineupContext.set(None)
-          AppState.selectedMatchId.set(None)
-          AppState.selectedTeamId.set(None)
-          AppState.selectedLeagueId.set(None)
+          if (AppState.invitationToken.now().isDefined) AppState.invitationToken.set(None)
+          else if (!AppState.tourSeen.now()) {
+            AppState.tourSeen.set(true)
+            dom.window.localStorage.setItem("fm_tour_seen", "1")
+          }
         }
       },
       tabIndex := 0,
       role := "application",
-      child <-- AppState.token.signal
-        .combineWith(showLogin.signal)
-        .combineWith(AppState.selectedLeagueId.signal)
-        .combineWith(AppState.selectedTeamId.signal)
-        .combineWith(AppState.invitationToken.signal)
-        .combineWith(AppState.selectedMatchId.signal)
-        .combineWith(AppState.lineupContext.signal)
-        .map { x =>
-          val tokenOpt: Option[String] = x._1
-          val isLogin: Boolean = x._2
-          val leagueIdOpt: Option[String] = x._3
-          val teamIdOpt: Option[String] = x._4
-          val invitationTokenOpt: Option[String] = x._5
-          val selectedMatchIdOpt: Option[String] = x._6
-          val lineupContextOpt: Option[(String, String)] = x._7
-          tokenOpt match {
-            case None => if (isLogin) LoginPage.render(showLogin) else RegisterPage.render(showLogin)
-            case Some(_) =>
-              if (invitationTokenOpt.nonEmpty)
-                AcceptInvitationPage.render(invitationTokenOpt.get, () => AppState.invitationToken.set(None))
-              else lineupContextOpt match {
-                case Some((mid, tid)) => MatchSquadPage.render(mid, tid, () => AppState.lineupContext.set(None))
-                case None =>
-                  selectedMatchIdOpt match {
-                    case Some(mid) => MatchDetailPage.render(mid, () => AppState.selectedMatchId.set(None))
-                    case None =>
-                      val pair: (Option[String], Option[String]) = (leagueIdOpt, teamIdOpt)
-                      pair match {
-                        case (Some(_), Some(tid)) => TeamPage.render(tid, () => AppState.selectedTeamId.set(None))
-                        case (Some(id), None)     => LeaguePage.render(id, () => AppState.selectedLeagueId.set(None))
-                        case (None, _)            => DashboardPage.render
+      onMountCallback(ctx => ctx.thisNode.ref.focus()),
+      child <-- AppState.token.signal.map {
+        case None =>
+          div(
+            child <-- AppState.currentPage.signal.map {
+              case Page.Register => RegisterPage.render
+              case _             => LoginPage.render
+            }
+          )
+        case Some(_) =>
+          div(
+            child <-- AppState.invitationToken.signal.combineWith(AppState.currentPage.signal).map {
+              case (Some(tok), _) =>
+                AcceptInvitationPage.render(tok, () => AppState.invitationToken.set(None))
+              case (None, page) =>
+                page match {
+                  case Page.Login | Page.Register => DashboardPage.render
+                  case Page.Dashboard             => DashboardPage.render
+                  case Page.LeagueView(id)        => LeaguePage.render(id, () => AppState.currentPage.set(Page.Dashboard))
+                  case Page.TeamView(tid, lid)    => TeamPage.render(tid, () => AppState.currentPage.set(Page.LeagueView(lid)))
+                  case Page.MatchView(mid, lid, teamIdOpt) =>
+                    MatchDetailPage.render(mid, lid, teamIdOpt, () =>
+                      teamIdOpt match {
+                        case Some(tid) => AppState.currentPage.set(Page.TeamView(tid, lid))
+                        case None      => AppState.currentPage.set(Page.LeagueView(lid))
                       }
-                  }
-              }
-          }
-        },
+                    )
+                  case Page.LineupEditor(mid, tid, lid) =>
+                    MatchSquadPage.render(mid, tid, () => AppState.currentPage.set(Page.MatchView(mid, lid, Some(tid))))
+                  case Page.AcceptInvitation(t) =>
+                    AcceptInvitationPage.render(t, () => AppState.currentPage.set(Page.Dashboard))
+                }
+            }
+          )
+      },
       child <-- (AppState.token.signal.combineWith(AppState.tourSeen.signal)).map { case (tok, seen) =>
         if (tok.nonEmpty && !seen) {
           div(

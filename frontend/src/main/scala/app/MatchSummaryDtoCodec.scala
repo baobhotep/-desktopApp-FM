@@ -79,6 +79,7 @@ object MatchSummaryDtoCodec {
       val passValueUnderPressureTotal = c.downField("passValueUnderPressureTotal").as[List[Double]].toOption
       val passValueUnderPressureByPlayer = c.downField("passValueUnderPressureByPlayer").as[Map[String, Double]].toOption
       val influenceScoreByPlayer = c.downField("influenceScoreByPlayer").as[Map[String, Double]].toOption
+      val highlights = c.downField("highlights").as[List[Map[String, String]]].toOption
       MatchSummaryDto(
         possessionPercent, homeGoals, awayGoals, shotsTotal, shotsOnTarget, shotsOffTarget, shotsBlocked, bigChances,
         xgTotal, passesTotal, passesCompleted, passAccuracyPercent, passesInFinalThird, crossesTotal, crossesSuccessful,
@@ -88,7 +89,7 @@ object MatchSummaryDtoCodec {
         vaepBreakdownByPlayer, pressingByPlayer, estimatedDistanceByPlayer, influenceByPlayer,
         avgDefendersInConeByZone, avgGkDistanceByZone, setPieceZoneActivity, pressingInOppHalfByPlayer,
         playerTortuosityByPlayer, metabolicLoadByPlayer, iwpByPlayer, setPiecePatternW, setPiecePatternH, setPieceRoutineCluster, poissonPrognosis,
-        voronoiCentroidByZone, passValueByPlayer, passValueTotal, passValueUnderPressureTotal, passValueUnderPressureByPlayer, influenceScoreByPlayer
+        voronoiCentroidByZone, passValueByPlayer, passValueTotal, passValueUnderPressureTotal, passValueUnderPressureByPlayer, influenceScoreByPlayer, highlights
       )
     }
 }

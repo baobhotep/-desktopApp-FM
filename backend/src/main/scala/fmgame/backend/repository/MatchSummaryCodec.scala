@@ -73,7 +73,8 @@ object MatchSummaryCodec {
       "passValueTotal" -> s.passValueTotal.fold(Json.Null)(t => Json.arr(Json.fromDoubleOrNull(t._1), Json.fromDoubleOrNull(t._2))),
       "passValueUnderPressureTotal" -> s.passValueUnderPressureTotal.fold(Json.Null)(t => Json.arr(Json.fromDoubleOrNull(t._1), Json.fromDoubleOrNull(t._2))),
       "passValueUnderPressureByPlayer" -> s.passValueUnderPressureByPlayer.fold(Json.Null)(m => Json.fromFields(m.map { case (k, v) => k -> Json.fromDoubleOrNull(v) })),
-      "influenceScoreByPlayer" -> s.influenceScoreByPlayer.fold(Json.Null)(m => Json.fromFields(m.map { case (k, v) => k -> Json.fromDoubleOrNull(v) }))
+      "influenceScoreByPlayer" -> s.influenceScoreByPlayer.fold(Json.Null)(m => Json.fromFields(m.map { case (k, v) => k -> Json.fromDoubleOrNull(v) })),
+      "highlights" -> s.highlights.fold(Json.Null)(list => Json.arr(list.map(m => Json.fromFields(m.map { case (k, v) => k -> Json.fromString(v) }))*))
     )
 
   private def decodePairInt(c: HCursor, key: String): Decoder.Result[(Int, Int)] =
@@ -125,15 +126,15 @@ object MatchSummaryCodec {
       ppda <- Right(c.downField("ppda").as[Vector[Double]].toOption.flatMap(v => if (v.size >= 2) Some((v(0), v(1))) else None))
       ballTortuosity <- Right(c.downField("ballTortuosity").as[Double].toOption)
       metabolicLoad <- Right(c.downField("metabolicLoad").as[Double].toOption)
-      xtByZone <- Right(c.downField("xtByZone").as[List[Double]].toOption.filter(_.size == 12))
+      xtByZone <- Right(c.downField("xtByZone").as[List[Double]].toOption.filter(_.nonEmpty))
       injuries <- decodePairInt(c, "injuries").orElse(Right((0, 0)))
-      homeShareByZone <- Right(c.downField("homeShareByZone").as[List[Double]].toOption.filter(_.size == 12))
+      homeShareByZone <- Right(c.downField("homeShareByZone").as[List[Double]].toOption.filter(_.nonEmpty))
       vaepBreakdownByPlayer <- Right(c.downField("vaepBreakdownByPlayer").as[Map[String, Map[String, Double]]].toOption)
       pressingByPlayer <- Right(c.downField("pressingByPlayer").as[Map[String, Int]].toOption)
       estimatedDistanceByPlayer <- Right(c.downField("estimatedDistanceByPlayer").as[Map[String, Double]].toOption)
       influenceByPlayer <- Right(c.downField("influenceByPlayer").as[Map[String, Map[String, Int]]].toOption)
-      avgDefendersInConeByZone <- Right(c.downField("avgDefendersInConeByZone").as[List[Double]].toOption.filter(_.size == 12))
-      avgGkDistanceByZone <- Right(c.downField("avgGkDistanceByZone").as[List[Double]].toOption.filter(_.size == 12))
+      avgDefendersInConeByZone <- Right(c.downField("avgDefendersInConeByZone").as[List[Double]].toOption.filter(_.nonEmpty))
+      avgGkDistanceByZone <- Right(c.downField("avgGkDistanceByZone").as[List[Double]].toOption.filter(_.nonEmpty))
       setPieceZoneActivity <- Right(c.downField("setPieceZoneActivity").as[Map[String, List[Int]]].toOption)
       pressingInOppHalfByPlayer <- Right(c.downField("pressingInOppHalfByPlayer").as[Map[String, Int]].toOption)
       playerTortuosityByPlayer <- Right(c.downField("playerTortuosityByPlayer").as[Map[String, Double]].toOption)
@@ -143,12 +144,13 @@ object MatchSummaryCodec {
       setPiecePatternH <- Right(c.downField("setPiecePatternH").as[List[Map[String, Double]]].toOption)
       setPieceRoutineCluster <- Right(c.downField("setPieceRoutineCluster").as[Map[String, Int]].toOption)
       poissonPrognosis <- Right(c.downField("poissonPrognosis").as[Vector[Double]].toOption.flatMap(v => if (v.size >= 3) Some((v(0), v(1), v(2))) else None))
-      voronoiCentroidByZone <- Right(c.downField("voronoiCentroidByZone").as[List[Double]].toOption.filter(_.size == 12))
+      voronoiCentroidByZone <- Right(c.downField("voronoiCentroidByZone").as[List[Double]].toOption.filter(_.nonEmpty))
       passValueByPlayer <- Right(c.downField("passValueByPlayer").as[Map[String, Double]].toOption)
       passValueTotal <- Right(c.downField("passValueTotal").as[Vector[Double]].toOption.flatMap(v => if (v.size >= 2) Some((v(0), v(1))) else None))
       passValueUnderPressureTotal <- Right(c.downField("passValueUnderPressureTotal").as[Vector[Double]].toOption.flatMap(v => if (v.size >= 2) Some((v(0), v(1))) else None))
       passValueUnderPressureByPlayer <- Right(c.downField("passValueUnderPressureByPlayer").as[Map[String, Double]].toOption)
       influenceScoreByPlayer <- Right(c.downField("influenceScoreByPlayer").as[Map[String, Double]].toOption)
+      highlights <- Right(c.downField("highlights").as[List[Map[String, String]]].toOption)
     } yield MatchSummary(
       possessionPercent, homeGoals, awayGoals, shotsTotal, shotsOnTarget, shotsOffTarget, shotsBlocked, bigChances, xgTotal,
       passesTotal, passesCompleted, passAccuracyPercent, passesInFinalThird, crossesTotal, crossesSuccessful, longBallsTotal, longBallsSuccessful,
@@ -158,6 +160,6 @@ object MatchSummaryCodec {
       vaepBreakdownByPlayer, pressingByPlayer, estimatedDistanceByPlayer, influenceByPlayer,
       avgDefendersInConeByZone, avgGkDistanceByZone, setPieceZoneActivity, pressingInOppHalfByPlayer,
       playerTortuosityByPlayer, metabolicLoadByPlayer, iwpByPlayer, setPiecePatternW, setPiecePatternH, setPieceRoutineCluster, poissonPrognosis,
-      voronoiCentroidByZone, passValueByPlayer, passValueTotal, passValueUnderPressureTotal, passValueUnderPressureByPlayer, influenceScoreByPlayer
+      voronoiCentroidByZone, passValueByPlayer, passValueTotal, passValueUnderPressureTotal, passValueUnderPressureByPlayer, influenceScoreByPlayer, highlights
     )
 }

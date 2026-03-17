@@ -292,8 +292,9 @@ object ApiClient {
     }
 
   def getMatchdayPrognosis(token: String, leagueId: String, matchday: Option[Int]): Future[Either[String, List[MatchPrognosisDto]]] = {
-      val q = matchday.fold("")(m => s"&matchday=$m")
-      fetchEither("GET", s"/leagues/$leagueId/matchday-prognosis?$q".stripPrefix("&"), None, Some(token)) { text =>
+      val q = matchday.fold("")(m => s"matchday=$m")
+      val sep = if (q.nonEmpty) s"?$q" else ""
+      fetchEither("GET", s"/leagues/$leagueId/matchday-prognosis$sep", None, Some(token)) { text =>
         decode[List[MatchPrognosisDto]](text).left.map(_.getMessage)
       }
     }
@@ -304,7 +305,7 @@ object ApiClient {
     }
 
   def submitPressConference(token: String, matchId: String, teamId: String, phase: String, tone: String): Future[Either[String, Unit]] =
-    fetchEither("POST", s"/matches/$matchId/press-conference?teamId=$teamId", Some(io.circe.Json.obj("phase" -> phase.asJson, "tone" -> tone.asJson).noSpaces), Some(token)) { _ =>
+    fetchEither("POST", s"/matches/$matchId/press-conference?teamId=${scala.scalajs.js.URIUtils.encodeURIComponent(teamId)}", Some(io.circe.Json.obj("phase" -> phase.asJson, "tone" -> tone.asJson).noSpaces), Some(token)) { _ =>
       Right(())
     }
 }

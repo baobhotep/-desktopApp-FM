@@ -70,4 +70,7 @@ object EngineConstants {
   val DribbleSuccessDefAgilityCoef: Double = 0.002
   /** Waga najbliższego obrońcy przy dryblingu (reszta to średnia). 0.6 = 60% waga najbliższego. */
   val DribbleNearestDefenderWeight: Double = 0.6
+
+  /** Maximum substitutions allowed per team per match (modern rules: 5). */
+  val MaxSubstitutions: Int = 5
 }

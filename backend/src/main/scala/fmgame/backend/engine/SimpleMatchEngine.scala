@@ -44,8 +44,8 @@ object SimpleMatchEngine extends MatchEngine {
     }
 
   private def buildResult(input: MatchEngineInput): Either[String, MatchEngineResult] = {
-    if (input.homeTeam.players.size != 11) Left("home team must have 11 players")
-    else if (input.awayTeam.players.size != 11) Left("away team must have 11 players")
+    if (input.homeTeam.players.size < 11) Left("home team must have at least 11 players")
+    else if (input.awayTeam.players.size < 11) Left("away team must have at least 11 players")
     else {
     val homeIds = input.homeTeam.players.map(_.player.id).toSet
     val awayIds = input.awayTeam.players.map(_.player.id).toSet
@@ -142,19 +142,20 @@ object SimpleMatchEngine extends MatchEngine {
   }
 
   private def poisson(lambda: Double, rng: scala.util.Random): Int = {
+    if (lambda <= 0.0) return 0
     val l = math.exp(-lambda)
     var k = 0
     var p = 1.0
     while (true) {
-      if (p <= l) return k - 1
+      if (p <= l) return math.max(0, k - 1)
       k += 1
       p *= rng.nextDouble()
     }
-    -1
+    0
   }
 
   /** Wartość zagrożenia strefy (1–12) w stylu DxT: wyższa strefa = bliżej bramki = wyższe zoneThreat. */
-  private def zoneThreat(zone: Int): Double = 0.04 + 0.012 * math.max(1, math.min(12, zone))
+  private def zoneThreat(zone: Int, isHome: Boolean): Double = DxT.baseZoneThreat(math.max(1, math.min(PitchModel.TotalZones, zone)), isHome)
 
   private def buildEvents(input: MatchEngineInput, homeGoals: Int, awayGoals: Int, strictness: Double, rng: scala.util.Random): List[MatchEventRecord] = {
     val kickOff = MatchEventRecord(0, "KickOff", None, None, Some(input.homeTeam.teamId), None, Some("Success"), Map.empty)
@@ -175,11 +176,11 @@ object SimpleMatchEngine extends MatchEngine {
     val passCandidatesHome = (1 to numPassHome).map(_ => (10 + rng.nextInt(80), input.homeTeam.teamId, homeOutfield(rng.nextInt(homeOutfield.size))))
     val passCandidatesAway = (1 to numPassAway).map(_ => (10 + rng.nextInt(80), input.awayTeam.teamId, awayOutfield(rng.nextInt(awayOutfield.size))))
     val passRecords = (passCandidatesHome ++ passCandidatesAway).map { case (min, tid, pmi) =>
-      val zone = 1 + rng.nextInt(12)
+      val zone = 1 + rng.nextInt(PitchModel.TotalZones)
       val xPass = 0.70 + 0.25 * rng.nextDouble()
       val fatigueFail = min >= 70 && rng.nextDouble() < 0.05
       val outcome = if (fatigueFail) "Missed" else "Success"
-      val threat = zoneThreat(zone)
+      val threat = zoneThreat(zone, tid == input.homeTeam.teamId)
       val isLongPass = rng.nextDouble() < 0.25
       val eventType = if (isLongPass) "LongPass" else "Pass"
       val meta = Map("xPass" -> f"$xPass%.2f", "zone" -> zone.toString, "zoneThreat" -> f"$threat%.3f") ++ (if (isLongPass) Map("distance" -> f"${25 + rng.nextInt(35)}") else Map.empty)
@@ -193,8 +194,8 @@ object SimpleMatchEngine extends MatchEngine {
       val comp = effectiveComposure(pmi)
       val roll = rng.nextDouble()
       val outcome = if (roll < 0.15 + comp * 0.2) "Saved" else if (roll < 0.45 + comp * 0.15) "Missed" else "Blocked"
-      val zone = 1 + rng.nextInt(12)
-      val threat = zoneThreat(zone)
+      val zone = 1 + rng.nextInt(PitchModel.TotalZones)
+      val threat = zoneThreat(zone, tid == input.homeTeam.teamId)
       MatchEventRecord(min, "Shot", Some(pmi.player.id), None, Some(tid), Some(zone), Some(outcome), Map("xG" -> "0.2", "zone" -> zone.toString, "zoneThreat" -> f"$threat%.3f"))
     }
     val foulCount = 1 + (strictness * 4).toInt.min(4)
@@ -204,7 +205,7 @@ object SimpleMatchEngine extends MatchEngine {
     }
     val foulRecords = foulCandidates.map { case (min, tid, pmi) =>
       val iwp = 0.35 + 0.35 * rng.nextDouble()
-      MatchEventRecord(min, "Foul", Some(pmi.player.id), None, Some(tid), Some(1 + rng.nextInt(12)), Some("Success"), Map("IWP" -> f"$iwp%.2f"))
+      MatchEventRecord(min, "Foul", Some(pmi.player.id), None, Some(tid), Some(1 + rng.nextInt(PitchModel.TotalZones)), Some("Success"), Map("IWP" -> f"$iwp%.2f"))
     }
     val cardRiskPerFoul = foulCandidates.map { case (_, _, pmi) =>
       (1.0 - effectiveDecisions(pmi)) * strictness
@@ -255,7 +256,7 @@ object SimpleMatchEngine extends MatchEngine {
       val min = 12 + rng.nextInt(66)
       val (tid, outfield) = if (rng.nextBoolean()) (input.homeTeam.teamId, homeOutfield) else (input.awayTeam.teamId, awayOutfield)
       val taker = if (tid == input.homeTeam.teamId) throwInTaker(tid, input.homePlan, homeOutfield) else throwInTaker(tid, input.awayPlan, awayOutfield)
-      MatchEventRecord(min, "ThrowIn", Some(taker.player.id), None, Some(tid), Some(3 + rng.nextInt(8)), Some("Success"), Map("xPass" -> f"${0.72 + rng.nextDouble() * 0.22}%.2f"))
+      MatchEventRecord(min, "ThrowIn", Some(taker.player.id), None, Some(tid), Some(1 + rng.nextInt(PitchModel.TotalZones)), Some("Success"), Map("xPass" -> f"${0.72 + rng.nextDouble() * 0.22}%.2f"))
     }
 
     val crossCount = 2 + rng.nextInt(3)
@@ -265,7 +266,9 @@ object SimpleMatchEngine extends MatchEngine {
       val outfield = if (tid == input.homeTeam.teamId) homeOutfield else awayOutfield
       val taker = outfield(rng.nextInt(outfield.size))
       val success = rng.nextDouble() < 0.35
-      MatchEventRecord(min, "Cross", Some(taker.player.id), None, Some(tid), Some(8 + rng.nextInt(4)), Some(if (success) "Success" else "Missed"), Map("xPass" -> f"${0.3 + rng.nextDouble() * 0.4}%.2f"))
+      val isHome = tid == input.homeTeam.teamId
+      val attackZones = (1 to PitchModel.TotalZones).filter(z => PitchModel.isAttackingThird(z, isHome)).toArray
+      MatchEventRecord(min, "Cross", Some(taker.player.id), None, Some(tid), Some(attackZones(rng.nextInt(attackZones.length))), Some(if (success) "Success" else "Missed"), Map("xPass" -> f"${0.3 + rng.nextDouble() * 0.4}%.2f"))
     }
 
     val passInterceptedCount = 1 + rng.nextInt(3)
@@ -276,7 +279,7 @@ object SimpleMatchEngine extends MatchEngine {
       } else {
         (input.awayTeam.teamId, awayOutfield(rng.nextInt(awayOutfield.size)), input.homeTeam.teamId, homeOutfield(rng.nextInt(homeOutfield.size)))
       }
-      MatchEventRecord(min, "PassIntercepted", Some(interceptor.player.id), Some(passer.player.id), Some(interceptingTid), Some(1 + rng.nextInt(12)), None, Map.empty)
+      MatchEventRecord(min, "PassIntercepted", Some(interceptor.player.id), Some(passer.player.id), Some(interceptingTid), Some(1 + rng.nextInt(PitchModel.TotalZones)), None, Map.empty)
     }
 
     val dribbleCount = 2 + rng.nextInt(4)
@@ -285,7 +288,7 @@ object SimpleMatchEngine extends MatchEngine {
       val tid = if (rng.nextBoolean()) input.homeTeam.teamId else input.awayTeam.teamId
       val outfield = if (tid == input.homeTeam.teamId) homeOutfield else awayOutfield
       val actor = outfield(rng.nextInt(outfield.size))
-      MatchEventRecord(min, "Dribble", Some(actor.player.id), None, Some(tid), Some(1 + rng.nextInt(12)), Some("Success"), Map("zone" -> (1 + rng.nextInt(12)).toString))
+      MatchEventRecord(min, "Dribble", Some(actor.player.id), None, Some(tid), Some(1 + rng.nextInt(PitchModel.TotalZones)), Some("Success"), Map("zone" -> (1 + rng.nextInt(PitchModel.TotalZones)).toString))
     }
     val dribbleLostCount = 1 + rng.nextInt(2)
     val dribbleLostEvents = (0 until dribbleLostCount).map { _ =>
@@ -295,7 +298,7 @@ object SimpleMatchEngine extends MatchEngine {
       } else {
         (input.awayTeam.teamId, awayOutfield(rng.nextInt(awayOutfield.size)), input.homeTeam.teamId, homeOutfield(rng.nextInt(homeOutfield.size)))
       }
-      MatchEventRecord(min, "DribbleLost", Some(loser.player.id), Some(winner.player.id), Some(lostTid), Some(1 + rng.nextInt(12)), None, Map.empty)
+      MatchEventRecord(min, "DribbleLost", Some(loser.player.id), Some(winner.player.id), Some(wonTid), Some(1 + rng.nextInt(PitchModel.TotalZones)), None, Map.empty)
     }
 
     val freeKickMinutes = foulCandidates.flatMap { case (min, tid, _) =>

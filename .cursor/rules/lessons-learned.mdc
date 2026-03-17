@@ -1,0 +1,16 @@
+---
+description: Zawsze dopisuj błędy i lekcje do cursor.md
+alwaysApply: true
+---
+
+# Lekcje na przyszłość (cursor.md)
+
+- W projekcie jest plik **`cursor.md`** w katalogu głównym – zawiera wpisy „błąd + lekcja”, żeby tych samych błędów nie powtarzać.
+- **Po każdej pomyłce lub po naprawie buga** (szczególnie takiego, który wynikał z review lub z twojej własnej poprawki):
+  1. Otwórz `cursor.md`.
+  2. Dopisz na końcu nowy wpis w formacie:
+     - Data (YYYY-MM-DD), krótki tytuł.
+     - **Błąd:** co było nie tak (1–2 zdania).
+     - **Lekcja:** co robić następnym razem / czego unikać.
+- Nie usuwaj istniejących wpisów – służą jako historia.
+- Przed wprowadzaniem zmian w newralgicznych miejscach (np. MatchState, silnik meczu, współdzielony state w UI) warto przejrzeć `cursor.md` pod kątem podobnych przypadków.

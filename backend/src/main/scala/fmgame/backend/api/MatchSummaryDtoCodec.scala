@@ -87,6 +87,7 @@ object MatchSummaryDtoCodec {
       val passValueUnderPressureTotal = c.downField("passValueUnderPressureTotal").as[List[Double]].toOption
       val passValueUnderPressureByPlayer = c.downField("passValueUnderPressureByPlayer").as[Map[String, Double]].toOption
       val influenceScoreByPlayer = c.downField("influenceScoreByPlayer").as[Map[String, Double]].toOption
+      val highlights = c.downField("highlights").as[List[Map[String, String]]].toOption
       MatchSummaryDto(
       possessionPercent, homeGoals, awayGoals, shotsTotal, shotsOnTarget, shotsOffTarget, shotsBlocked, bigChances,
       xgTotal, passesTotal, passesCompleted, passAccuracyPercent, passesInFinalThird, crossesTotal, crossesSuccessful,
@@ -96,7 +97,7 @@ object MatchSummaryDtoCodec {
       vaepBreakdownByPlayer, pressingByPlayer, estimatedDistanceByPlayer, influenceByPlayer,
       avgDefendersInConeByZone, avgGkDistanceByZone, setPieceZoneActivity, pressingInOppHalfByPlayer,
       playerTortuosityByPlayer, metabolicLoadByPlayer, iwpByPlayer, setPiecePatternW, setPiecePatternH, setPieceRoutineCluster, poissonPrognosis,
-      voronoiCentroidByZone, passValueByPlayer, passValueTotal, passValueUnderPressureTotal, passValueUnderPressureByPlayer, influenceScoreByPlayer
+      voronoiCentroidByZone, passValueByPlayer, passValueTotal, passValueUnderPressureTotal, passValueUnderPressureByPlayer, influenceScoreByPlayer, highlights
     )
     }
 
@@ -167,6 +168,7 @@ object MatchSummaryDtoCodec {
       "passValueTotal" -> s.passValueTotal.fold(Json.Null)(l => Json.arr(l.map(Json.fromDoubleOrNull)*)),
       "passValueUnderPressureTotal" -> s.passValueUnderPressureTotal.fold(Json.Null)(l => Json.arr(l.map(Json.fromDoubleOrNull)*)),
       "passValueUnderPressureByPlayer" -> s.passValueUnderPressureByPlayer.fold(Json.Null)(m => Json.fromFields(m.map { case (k, v) => k -> Json.fromDoubleOrNull(v) })),
-      "influenceScoreByPlayer" -> s.influenceScoreByPlayer.fold(Json.Null)(m => Json.fromFields(m.map { case (k, v) => k -> Json.fromDoubleOrNull(v) }))
+      "influenceScoreByPlayer" -> s.influenceScoreByPlayer.fold(Json.Null)(m => Json.fromFields(m.map { case (k, v) => k -> Json.fromDoubleOrNull(v) })),
+      "highlights" -> s.highlights.fold(Json.Null)(list => Json.arr(list.map(m => Json.fromFields(m.map { case (k, v) => k -> Json.fromString(v) }))*))
     )
 }

@@ -84,9 +84,17 @@ object TransferOfferId {
   extension (x: TransferOfferId) def value: String = x
 }
 
+opaque type ContractId = String
+object ContractId {
+  def apply(s: String): ContractId = s
+  def random(): ContractId = java.util.UUID.randomUUID().toString
+  extension (x: ContractId) def value: String = x
+}
+
 opaque type BotId = String
 object BotId {
   def apply(s: String): BotId = s
+  def random(): BotId = java.util.UUID.randomUUID().toString
   extension (x: BotId) def value: String = x
 }
 

@@ -22,15 +22,20 @@ case class UserServiceLive(
   xa: doobie.Transactor[zio.Task]
 ) extends UserService {
 
+  private def validateEmail(email: String): ZIO[Any, String, Unit] =
+    ZIO.fail("Invalid email address").when(email.trim.isEmpty || !email.contains("@") || !email.contains(".") || email.length > 255).as(())
+
   def register(email: String, password: String, displayName: String): ZIO[Any, String, UserDto] =
     (for {
+      _ <- validateEmail(email)
+      _ <- ZIO.fail("Display name must be 1-100 characters").when(displayName.trim.isEmpty || displayName.trim.length > 100)
       _ <- validatePassword(password)
       existing <- userRepo.findByEmail(email).transact(xa).orDie
       _ <- ZIO.fail("Email already registered").when(existing.isDefined)
       id <- IdGen.genUserId
       hash <- AuthService.hashPasswordZIO(password)
       user = User(id, email, hash, displayName, Instant.now())
-      _ <- userRepo.create(user).transact(xa).orDie
+      _ <- userRepo.create(user).transact(xa).mapError(_ => "Email already registered")
       dto = UserDto(user.id.value, user.email, user.displayName, user.createdAt.toEpochMilli)
       _ <- ZIO.logInfo(s"User registered: ${user.email}")
     } yield dto).tapError(err => ZIO.logWarning(s"Register failed for $email: $err"))

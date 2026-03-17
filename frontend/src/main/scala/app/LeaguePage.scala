@@ -10,6 +10,7 @@ object LeaguePage {
     val tableRows = Var[List[TableRowDto]](Nil)
     val fixtures = Var[List[MatchDto]](Nil)
     val fixturesLoadingMore = Var(false)
+    val fixturesHasMore = Var(true)
     val FixturesPageSize = 20
     val teams = Var[List[TeamDto]](Nil)
     val error = Var[Option[String]](None)
@@ -175,6 +176,7 @@ object LeaguePage {
         App.runZio(ApiClient.getFixtures(leagueId, Some(FixturesPageSize), Some(offset))) {
           case Right(more) =>
             fixtures.update(_ ++ more)
+            fixturesHasMore.set(more.size >= FixturesPageSize)
             fixturesLoadingMore.set(false)
           case Left(_) => fixturesLoadingMore.set(false)
         }
@@ -190,8 +192,6 @@ object LeaguePage {
           case Left(m)  => playError.set(Some(m)); playBusy.set(false)
         }
     }
-
-    load()
 
     def myTeamIdOpt(ts: List[TeamDto], userOpt: Option[UserDto]): Option[String] =
       userOpt.flatMap(u => ts.find(_.ownerUserId.contains(u.id)).map(_.id))
@@ -331,6 +331,7 @@ object LeaguePage {
 
     div(
       cls := "max-w-4xl mx-auto",
+      onMountCallback { _ => load() },
       button(
         cls := "mb-4 px-3 py-1 text-sm bg-gray-200 dark:bg-gray-700 rounded hover:bg-gray-300",
         "← Back",
@@ -426,7 +427,7 @@ object LeaguePage {
                         button(
                           cls := "text-left text-blue-600 dark:text-blue-400 hover:underline",
                           r.teamName,
-                          onClick --> { _ => AppState.selectedTeamId.set(Some(r.teamId)) }
+                          onClick --> { _ => AppState.currentPage.set(Page.TeamView(r.teamId, leagueId)) }
                         )
                       ),
                       td(cls := "border p-2", r.points.toString),
@@ -619,18 +620,21 @@ object LeaguePage {
                   }
                 )
               ),
-              child <-- h2hResult.signal.map {
+              child <-- h2hResult.signal.combineWith(teams.signal).map { case (h2hOpt, ts) =>
+                h2hOpt match {
                 case None => emptyNode
                 case Some(Left(msg)) => div(cls := "text-red-600 text-xs", msg)
                 case Some(Right(list)) =>
                   if (list.isEmpty) div(cls := "text-gray-500 text-xs", "Brak meczów H2H.")
                   else ul(cls := "space-y-1 text-xs",
                     list.map(m => {
+                      val homeName = ts.find(_.id == m.homeTeamId).map(_.name).getOrElse(m.homeTeamId.take(8))
+                      val awayName = ts.find(_.id == m.awayTeamId).map(_.name).getOrElse(m.awayTeamId.take(8))
                       val score = (m.homeGoals, m.awayGoals) match { case (Some(h), Some(a)) => s" $h–$a "; case _ => " – " }
-                      li(s"MD${m.matchday} ${m.homeTeamId} $score ${m.awayTeamId}")
+                      li(s"MD${m.matchday} $homeName$score$awayName")
                     }).toSeq
                   )
-              }
+              }}
             ),
             div(
               cls := "mt-4 p-3 rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 text-sm",
@@ -732,9 +736,11 @@ object LeaguePage {
             ),
             div(
               cls := "space-y-2",
-              children <-- fixtures.signal.combineWith(teams.signal).combineWith(AppState.currentUser.signal).combineWith(fixturesLoadingMore.signal).combineWith(exportSelectedMatchIds.signal).combineWith(visibleFixturesCount.signal).map { case (list, ts, userOpt, loadingMore, _, visibleCount) =>
+                children <-- fixtures.signal.combineWith(teams.signal).combineWith(AppState.currentUser.signal).combineWith(fixturesLoadingMore.signal).combineWith(visibleFixturesCount.signal).combineWith(fixturesHasMore.signal).map { x =>
+                val (list, ts, userOpt, loadingMore, visibleCount) = (x._1, x._2, x._3, x._4, x._5)
+                val hasMore: Boolean = x._6
                 val myTeamIdOpt = userOpt.flatMap(u => ts.find(_.ownerUserId.contains(u.id)).map(_.id))
-                val showMoreFromApi = list.size >= FixturesPageSize && !loadingMore
+                val showMoreFromApi = hasMore && !loadingMore
                 val visibleList = list.take(visibleCount)
                 val showMoreFromList = list.size > visibleCount
                 val nodes = visibleList.map { m =>
@@ -765,13 +771,13 @@ object LeaguePage {
                       button(
                         cls := "text-sm text-blue-600 dark:text-blue-400 hover:underline",
                         "Szczegóły",
-                        onClick --> { _ => AppState.selectedMatchId.set(Some(m.id)) }
+                        onClick --> { _ => AppState.currentPage.set(Page.MatchView(m.id, leagueId, myTeamIdOpt)) }
                       ),
                       if (isMyMatch && m.status == "Scheduled") {
                         button(
                           cls := "text-sm px-2 py-0.5 bg-amber-600 text-white rounded hover:bg-amber-700",
                           "Ustaw skład",
-                          onClick --> { _ => myTeamIdOpt.foreach(tid => AppState.lineupContext.set(Some((m.id, tid)))) }
+                          onClick --> { _ => myTeamIdOpt.foreach(tid => AppState.currentPage.set(Page.LineupEditor(m.id, tid, leagueId))) }
                         )
                       } else emptyNode,
                       span(cls := "text-gray-500 text-sm", m.status)
@@ -926,8 +932,8 @@ object LeaguePage {
             h2(cls := "text-lg font-semibold mt-8 mb-2", "Scouting / Rekrutacja (MVP)"),
             child <-- (teams.signal.combineWith(AppState.currentUser.signal)).map { case (ts, userOpt) =>
               val teamIdOpt = myTeamIdOpt(ts, userOpt)
-              teamIdOpt.foreach(refreshShortlist)
               div(
+                onMountCallback { _ => teamIdOpt.foreach(refreshShortlist) },
                 cls := "p-3 rounded border border-gray-300 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 text-sm space-y-2",
                 div(cls := "grid grid-cols-1 md:grid-cols-3 gap-2",
                   input(typ := "text", cls := "px-2 py-1 border rounded dark:bg-gray-700", placeholder := "Pozycja (np. ST, CB)",
@@ -1008,7 +1014,7 @@ object LeaguePage {
                           reportBusy.set(true)
                           App.runZio(ApiClient.createScoutingReport(tok, tid, CreateScoutingReportRequest(reportTarget.now(), reportRating.now().toDoubleOption.getOrElse(7.0), reportNotes.now()))) {
                             case Right(_) => reportBusy.set(false); reportTarget.set(""); reportNotes.set(""); refreshShortlist(tid)
-                            case Left(_)  => reportBusy.set(false)
+                            case Left(msg) => reportBusy.set(false); scoutingErr.set(Some(s"Błąd zapisu raportu: $msg"))
                           }
                         }
                       }

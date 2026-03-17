@@ -28,6 +28,8 @@ object BotSquadBuilderSpec extends ZIOSpecDefault {
     None,
     1.0,
     1.0,
+    1.0,
+    1.0,
     Instant.EPOCH
   )
 

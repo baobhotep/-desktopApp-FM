@@ -33,6 +33,7 @@ object ApiIntegrationSpec extends ZIOSpecDefault {
       TransferOfferRepository.impl, LeagueContextRepository.impl, GamePlanSnapshotRepository.impl,
       TrainingPlanRepository.impl, ShortlistRepository.impl, ScoutingReportRepository.impl,
       LeaguePlayerMatchStatsRepository.impl,
+      ContractRepository.impl,
       FullMatchEngine, engineModelsRef, xa
     )
     apiRoutes = new ApiRoutes(userSvc, leagueSvc, "test-secret", None)

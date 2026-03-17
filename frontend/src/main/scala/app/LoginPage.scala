@@ -4,20 +4,25 @@ import fmgame.shared.api._
 import com.raquo.laminar.api.L.*
 
 object LoginPage {
-  def render(showLogin: Var[Boolean]): Element = {
+  def render: Element = {
     val email = Var("")
     val password = Var("")
     val error = Var[Option[String]](None)
     val busy = Var(false)
 
     def doLogin(): Unit = {
+      val e = email.now().trim
+      val p = password.now()
+      if (e.isEmpty || !e.contains("@")) { error.set(Some("Podaj poprawny adres e-mail")); return }
+      if (p.isEmpty) { error.set(Some("Podaj hasło")); return }
       error.set(None)
       busy.set(true)
-      App.runZio(ApiClient.login(LoginRequest(email.now(), password.now()))) {
+      App.runZio(ApiClient.login(LoginRequest(e, p))) {
         case Right(login) =>
-          org.scalajs.dom.window.localStorage.setItem("fm-game-jwt", login.token)
+          org.scalajs.dom.window.localStorage.setItem(AuthConstants.TokenKey, login.token)
           AppState.token.set(Some(login.token))
           AppState.currentUser.set(Some(login.user))
+          AppState.currentPage.set(Page.Dashboard)
           error.set(None)
           busy.set(false)
         case Left(msg) =>
@@ -66,7 +71,7 @@ object LoginPage {
       button(
         cls := "w-full mt-2 py-2 text-blue-600 dark:text-blue-400",
         "Register instead",
-        onClick --> { _ => showLogin.set(false) }
+        onClick --> { _ => AppState.currentPage.set(Page.Register) }
       )
     )
   }

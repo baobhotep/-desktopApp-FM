@@ -13,6 +13,7 @@ trait TeamRepository {
   def listByLeague(leagueId: LeagueId): ConnectionIO[List[Team]]
   def countByLeague(leagueId: LeagueId): ConnectionIO[Int]
   def update(team: Team): ConnectionIO[Unit]
+  def updateLeagueId(teamId: TeamId, newLeagueId: LeagueId): ConnectionIO[Unit]
   def updateElo(teamId: TeamId, eloRating: Double): ConnectionIO[Unit]
 }
 
@@ -60,9 +61,12 @@ object TeamRepository {
 
     def update(team: Team): ConnectionIO[Unit] =
       sql"""
-        UPDATE teams SET name = ${team.name}, budget = ${team.budget}, elo_rating = ${team.eloRating}, manager_name = ${team.managerName}
+        UPDATE teams SET name = ${team.name}, league_id = ${team.leagueId.value}, budget = ${team.budget}, elo_rating = ${team.eloRating}, manager_name = ${team.managerName}
         WHERE id = ${team.id.value}
       """.update.run.map(_ => ())
+
+    def updateLeagueId(teamId: TeamId, newLeagueId: LeagueId): ConnectionIO[Unit] =
+      sql"UPDATE teams SET league_id = ${newLeagueId.value} WHERE id = ${teamId.value}".update.run.map(_ => ())
 
     def updateElo(teamId: TeamId, eloRating: Double): ConnectionIO[Unit] =
       sql"UPDATE teams SET elo_rating = $eloRating WHERE id = ${teamId.value}".update.run.map(_ => ())

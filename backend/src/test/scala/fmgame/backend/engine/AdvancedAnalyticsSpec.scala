@@ -22,8 +22,8 @@ object AdvancedAnalyticsSpec extends ZIOSpecDefault {
     },
     test("xTValueIteration returns values per zone and base threat increases with zone") {
       val counts = Map((1, 2) -> 1, (2, 3) -> 1, (3, 4) -> 1, (4, 5) -> 1, (5, 6) -> 1, (6, 7) -> 1, (7, 8) -> 1, (8, 9) -> 1, (9, 10) -> 2, (10, 11) -> 1, (11, 12) -> 1)
-      val xt = AdvancedAnalytics.xTValueIteration(counts, DxT.baseZoneThreat)
-      assertTrue(xt.size == 12, xt.values.forall(_ >= 0.0), DxT.baseZoneThreat(12) > DxT.baseZoneThreat(1))
+      val xt = AdvancedAnalytics.xTValueIteration(counts, z => DxT.baseZoneThreat(z, true))
+      assertTrue(xt.size == PitchModel.TotalZones, xt.values.forall(_ >= 0.0), DxT.baseZoneThreat(PitchModel.TotalZones, true) > DxT.baseZoneThreat(1, true))
     },
     test("clusteringByNode returns 0 for no edges, 1 for triangle") {
       val pid1 = PlayerId("a")
@@ -32,18 +32,21 @@ object AdvancedAnalyticsSpec extends ZIOSpecDefault {
       val edges = List((pid1, pid2), (pid2, pid3), (pid3, pid1))
       val nodes = List(pid1, pid2, pid3)
       val cl = AdvancedAnalytics.clusteringByNode(edges, nodes)
-      assertTrue(cl(pid1) == 1.0, cl(pid2) == 1.0, cl(pid3) == 1.0)
+      val clNoEdges = AdvancedAnalytics.clusteringByNode(List.empty, nodes)
+      assertTrue(cl(pid1) == 1.0, cl(pid2) == 1.0, cl(pid3) == 1.0, clNoEdges.values.forall(_ == 0.0))
     },
-    test("obsByZone returns map of 12 zones with values in [0,1]") {
-      val obs = AdvancedAnalytics.obsByZone(DxT.baseZoneThreat)
-      assertTrue(obs.size == 12, obs.values.forall(v => v >= 0 && v <= 1))
+    test("obsByZone returns map of all zones with values in [0,1]") {
+      val obs = AdvancedAnalytics.obsByZone(z => DxT.baseZoneThreat(z, true))
+      assertTrue(obs.size == PitchModel.TotalZones, obs.values.forall(v => v >= 0 && v <= 1))
     },
-    test("ballTortuosity returns None for single zone, Some > 1 for non-straight path") {
+    test("ballTortuosity returns None for single zone, ~1 for straight, >1 for zigzag") {
+      val single = List(ev(1, "Pass", Some(5)))
+      val tortSingle = AdvancedAnalytics.ballTortuosity(single)
       val straight = List(ev(1, "Pass", Some(1)), ev(2, "Pass", Some(12)))
       val tortStraight = AdvancedAnalytics.ballTortuosity(straight)
       val zigzag = List(ev(1, "Pass", Some(1)), ev(2, "Pass", Some(4)), ev(3, "Pass", Some(7)), ev(4, "Pass", Some(12)))
       val tortZigzag = AdvancedAnalytics.ballTortuosity(zigzag)
-      assertTrue(tortStraight.isDefined, tortZigzag.isDefined, tortZigzag.get >= 1.0)
+      assertTrue(tortSingle.isEmpty, tortStraight.isDefined, tortStraight.forall(v => math.abs(v - 1.0) < 0.1), tortZigzag.isDefined, tortZigzag.get >= 1.0)
     },
     test("metabolicLoadFromZonePath sums distances") {
       val events = List(ev(1, "Pass", Some(1)), ev(2, "Pass", Some(12)))
@@ -63,7 +66,7 @@ object AdvancedAnalyticsSpec extends ZIOSpecDefault {
         MatchEventRecord(3, "Shot", Some(PlayerId("p1")), None, Some(homeId), Some(10), None, Map.empty)
       )
       val dom = AdvancedAnalytics.zoneDominanceFromEvents(events, homeId, awayId)
-      assertTrue(dom.size == 12, dom(5) == 0.5, dom(10) == 1.0)
+      assertTrue(dom.size == PitchModel.TotalZones, dom(5) == 0.5, dom(10) == 1.0)
     },
     test("shotContextByZoneFromEvents returns avg defenders and gkDistance per zone") {
       val events = List(
@@ -71,7 +74,7 @@ object AdvancedAnalyticsSpec extends ZIOSpecDefault {
         MatchEventRecord(2, "Goal", Some(PlayerId("p2")), None, Some(TeamId("h")), Some(10), Some("Success"), Map("defendersInCone" -> "0", "gkDistance" -> "1.0"))
       )
       val ctx = AdvancedAnalytics.shotContextByZoneFromEvents(events)
-      assertTrue(ctx.size == 12, ctx(10)._1 == 1.0, ctx(10)._2 == 2.25)
+      assertTrue(ctx.size == PitchModel.TotalZones, ctx(10)._1 == 1.0, ctx(10)._2 == 2.25)
     },
     test("setPieceZoneActivityFromEvents returns zone counts per Corner/FreeKick routine") {
       val events = List(
@@ -93,7 +96,7 @@ object AdvancedAnalyticsSpec extends ZIOSpecDefault {
       assertTrue(tort2(pid) >= 1.0)
     },
     test("setPiecePatternsNMF returns W and H for activity map") {
-      val activity = Map("Corner:default" -> (1 to 12).map(z => z -> (if (z <= 6) 2 else 0)).toMap, "FreeKick:default" -> (1 to 12).map(z => z -> (if (z >= 7) 2 else 0)).toMap)
+      val activity = Map("Corner:default" -> (1 to PitchModel.TotalZones).map(z => z -> (if (z <= 12) 2 else 0)).toMap, "FreeKick:default" -> (1 to PitchModel.TotalZones).map(z => z -> (if (z >= 13) 2 else 0)).toMap)
       val (w, h) = AdvancedAnalytics.setPiecePatternsNMF(activity, 2, 20)
       assertTrue(w.nonEmpty, h.size == 2, w.keys.forall(activity.contains))
     },
@@ -123,18 +126,20 @@ object AdvancedAnalyticsSpec extends ZIOSpecDefault {
         MatchEventRecord(3, "Pass", Some(PlayerId("p3")), None, Some(awayId), Some(12), Some("Success"), Map.empty)
       )
       val vor = AdvancedAnalytics.voronoiZoneFromCentroids(events, homeId, awayId)
-      assertTrue(vor.size == 12, vor.values.forall(v => v == 0.0 || v == 1.0 || v == 0.5))
+      assertTrue(vor.size == PitchModel.TotalZones, vor.values.forall(v => v == 0.0 || v == 1.0 || v == 0.5))
     },
     test("xTValueIteration values are non-negative and finite (property)") {
-      val baseThreatBounded = (z: Int) => (z / 12.0).min(1.0).max(0.0)
-      val counts = Map((1, 2) -> 2, (2, 3) -> 2, (3, 1) -> 1, (11, 12) -> 3, (12, 11) -> 1)
+      val nz = PitchModel.TotalZones
+      val baseThreatBounded = (z: Int) => (z.toDouble / nz).min(1.0).max(0.0)
+      val counts = Map((1, 2) -> 2, (2, 3) -> 2, (3, 1) -> 1, (nz - 1, nz) -> 3, (nz, nz - 1) -> 1)
       val xt = AdvancedAnalytics.xTValueIteration(counts, baseThreatBounded, gamma = 0.95)
-      assertTrue(xt.size == 12, xt.values.forall(v => v >= 0.0 && v.isFinite))
+      assertTrue(xt.size == nz, xt.values.forall(v => v >= 0.0 && v.isFinite))
     },
     test("xPassValueFromEvents returns passValueByPlayer, totals, under-pressure totals and byPlayerUnder") {
       val homeId = TeamId("h")
       val awayId = TeamId("a")
-      val xt = (1 to 12).map(z => z -> (z / 12.0)).toMap
+      val nz = PitchModel.TotalZones
+      val xt = (1 to nz).map(z => z -> (z.toDouble / nz)).toMap
       val events = List(
         MatchEventRecord(1, "Pass", Some(PlayerId("p1")), None, Some(homeId), Some(3), Some("Success"), Map("receiverPressure" -> "0")),
         MatchEventRecord(2, "Pass", Some(PlayerId("p2")), None, Some(homeId), Some(8), Some("Success"), Map("receiverPressure" -> "3")),

@@ -71,7 +71,7 @@ object FixtureGenerator {
       val rotated = rotateRight(others, round)
       val first = 0 :: rotated.take(n/2 - 1)
       val second = rotated.drop(n/2 - 1).reverse
-      first.zip(second).map { case (a, b) => (math.min(a, b), math.max(a, b)) }
+      first.zip(second).map { case (a, b) => if (round % 2 == 0) (a, b) else (b, a) }
     }.toList
   }
 

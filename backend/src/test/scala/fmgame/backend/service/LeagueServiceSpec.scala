@@ -39,6 +39,7 @@ object LeagueServiceSpec extends ZIOSpecDefault {
           TransferOfferRepository.impl, LeagueContextRepository.impl, GamePlanSnapshotRepository.impl,
           TrainingPlanRepository.impl, ShortlistRepository.impl, ScoutingReportRepository.impl,
           LeaguePlayerMatchStatsRepository.impl,
+          ContractRepository.impl,
           FullMatchEngine, engineModelsRef, xa
         )
         created     <- leagueSvc.create("Test League", 10, "My Team", "Europe/Warsaw", creatorId)
@@ -84,6 +85,7 @@ object LeagueServiceSpec extends ZIOSpecDefault {
           TransferOfferRepository.impl, LeagueContextRepository.impl, GamePlanSnapshotRepository.impl,
           TrainingPlanRepository.impl, ShortlistRepository.impl, ScoutingReportRepository.impl,
           LeaguePlayerMatchStatsRepository.impl,
+          ContractRepository.impl,
           FullMatchEngine, engineModelsRef, xa
         )
         created <- leagueSvc.create("Log Test League", 10, "My Team", "Europe/Warsaw", userId)
@@ -125,6 +127,7 @@ object LeagueServiceSpec extends ZIOSpecDefault {
           TransferOfferRepository.impl, LeagueContextRepository.impl, GamePlanSnapshotRepository.impl,
           TrainingPlanRepository.impl, ShortlistRepository.impl, ScoutingReportRepository.impl,
           LeaguePlayerMatchStatsRepository.impl,
+          ContractRepository.impl,
           FullMatchEngine, engineModelsRef, xa
         )
         created <- leagueSvc.create("Export League", 10, "My Team", "Europe/Warsaw", userId)
@@ -167,6 +170,7 @@ object LeagueServiceSpec extends ZIOSpecDefault {
           TransferOfferRepository.impl, LeagueContextRepository.impl, GamePlanSnapshotRepository.impl,
           TrainingPlanRepository.impl, ShortlistRepository.impl, ScoutingReportRepository.impl,
           LeaguePlayerMatchStatsRepository.impl,
+          ContractRepository.impl,
           FullMatchEngine, engineModelsRef, xa
         )
         created <- leagueSvc.create("Budget League", 10, "My Team", "Europe/Warsaw", userId)
@@ -205,6 +209,7 @@ object LeagueServiceSpec extends ZIOSpecDefault {
           TransferOfferRepository.impl, LeagueContextRepository.impl, GamePlanSnapshotRepository.impl,
           TrainingPlanRepository.impl, ShortlistRepository.impl, ScoutingReportRepository.impl,
           LeaguePlayerMatchStatsRepository.impl,
+          ContractRepository.impl,
           FullMatchEngine, engineModelsRef, xa
         )
         created <- leagueSvc.create("Prognosis League", 10, "My Team", "Europe/Warsaw", userId)

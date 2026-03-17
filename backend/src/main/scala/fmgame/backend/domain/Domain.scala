@@ -6,37 +6,41 @@ import java.time.Instant
 import java.time.LocalDate
 import java.time.ZoneId
 
-// Re-export shared IDs and add random generators for backend. Prefer ZIO generators (gen*) for testability.
 object IdGen {
-  def userId: UserId = UserId(java.util.UUID.randomUUID().toString)
-  def leagueId: LeagueId = LeagueId(java.util.UUID.randomUUID().toString)
-  def teamId: TeamId = TeamId(java.util.UUID.randomUUID().toString)
-  def playerId: PlayerId = PlayerId(java.util.UUID.randomUUID().toString)
-  def matchId: MatchId = MatchId(java.util.UUID.randomUUID().toString)
-  def refereeId: RefereeId = RefereeId(java.util.UUID.randomUUID().toString)
-  def invitationId: InvitationId = InvitationId(java.util.UUID.randomUUID().toString)
-  def matchSquadId: MatchSquadId = MatchSquadId(java.util.UUID.randomUUID().toString)
-  def matchResultLogId: MatchResultLogId = MatchResultLogId(java.util.UUID.randomUUID().toString)
-  def gamePlanSnapshotId: GamePlanSnapshotId = GamePlanSnapshotId(java.util.UUID.randomUUID().toString)
-  def transferWindowId: TransferWindowId = TransferWindowId(java.util.UUID.randomUUID().toString)
-  def transferOfferId: TransferOfferId = TransferOfferId(java.util.UUID.randomUUID().toString)
-  def botId: BotId = BotId(java.util.UUID.randomUUID().toString)
-  def leagueContextId: LeagueContextId = LeagueContextId(java.util.UUID.randomUUID().toString)
+  private def gen[A](f: () => A): ZIO[Any, Nothing, A] = ZIO.succeed(f())
 
-  def genUserId: ZIO[Any, Nothing, UserId] = ZIO.succeed(UserId(java.util.UUID.randomUUID().toString))
-  def genLeagueId: ZIO[Any, Nothing, LeagueId] = ZIO.succeed(LeagueId(java.util.UUID.randomUUID().toString))
-  def genTeamId: ZIO[Any, Nothing, TeamId] = ZIO.succeed(TeamId(java.util.UUID.randomUUID().toString))
-  def genPlayerId: ZIO[Any, Nothing, PlayerId] = ZIO.succeed(PlayerId(java.util.UUID.randomUUID().toString))
-  def genMatchId: ZIO[Any, Nothing, MatchId] = ZIO.succeed(MatchId(java.util.UUID.randomUUID().toString))
-  def genRefereeId: ZIO[Any, Nothing, RefereeId] = ZIO.succeed(RefereeId(java.util.UUID.randomUUID().toString))
-  def genInvitationId: ZIO[Any, Nothing, InvitationId] = ZIO.succeed(InvitationId(java.util.UUID.randomUUID().toString))
-  def genMatchSquadId: ZIO[Any, Nothing, MatchSquadId] = ZIO.succeed(MatchSquadId(java.util.UUID.randomUUID().toString))
-  def genMatchResultLogId: ZIO[Any, Nothing, MatchResultLogId] = ZIO.succeed(MatchResultLogId(java.util.UUID.randomUUID().toString))
-  def genGamePlanSnapshotId: ZIO[Any, Nothing, GamePlanSnapshotId] = ZIO.succeed(GamePlanSnapshotId(java.util.UUID.randomUUID().toString))
-  def genTransferWindowId: ZIO[Any, Nothing, TransferWindowId] = ZIO.succeed(TransferWindowId(java.util.UUID.randomUUID().toString))
-  def genTransferOfferId: ZIO[Any, Nothing, TransferOfferId] = ZIO.succeed(TransferOfferId(java.util.UUID.randomUUID().toString))
-  def genBotId: ZIO[Any, Nothing, BotId] = ZIO.succeed(BotId(java.util.UUID.randomUUID().toString))
-  def genLeagueContextId: ZIO[Any, Nothing, LeagueContextId] = ZIO.succeed(LeagueContextId(java.util.UUID.randomUUID().toString))
+  def userId: UserId                         = UserId.random()
+  def leagueId: LeagueId                     = LeagueId.random()
+  def teamId: TeamId                         = TeamId.random()
+  def playerId: PlayerId                     = PlayerId.random()
+  def matchId: MatchId                       = MatchId.random()
+  def refereeId: RefereeId                   = RefereeId.random()
+  def invitationId: InvitationId             = InvitationId.random()
+  def matchSquadId: MatchSquadId             = MatchSquadId.random()
+  def matchResultLogId: MatchResultLogId     = MatchResultLogId.random()
+  def gamePlanSnapshotId: GamePlanSnapshotId = GamePlanSnapshotId.random()
+  def transferWindowId: TransferWindowId     = TransferWindowId.random()
+  def transferOfferId: TransferOfferId       = TransferOfferId.random()
+  def contractId: ContractId                 = ContractId.random()
+  def botId: BotId                           = BotId.random()
+  def leagueContextId: LeagueContextId       = LeagueContextId.random()
+  def token: String                          = java.util.UUID.randomUUID().toString
+
+  def genUserId: ZIO[Any, Nothing, UserId]                         = gen(() => UserId.random())
+  def genLeagueId: ZIO[Any, Nothing, LeagueId]                     = gen(() => LeagueId.random())
+  def genTeamId: ZIO[Any, Nothing, TeamId]                         = gen(() => TeamId.random())
+  def genPlayerId: ZIO[Any, Nothing, PlayerId]                     = gen(() => PlayerId.random())
+  def genMatchId: ZIO[Any, Nothing, MatchId]                       = gen(() => MatchId.random())
+  def genRefereeId: ZIO[Any, Nothing, RefereeId]                   = gen(() => RefereeId.random())
+  def genInvitationId: ZIO[Any, Nothing, InvitationId]             = gen(() => InvitationId.random())
+  def genMatchSquadId: ZIO[Any, Nothing, MatchSquadId]             = gen(() => MatchSquadId.random())
+  def genMatchResultLogId: ZIO[Any, Nothing, MatchResultLogId]     = gen(() => MatchResultLogId.random())
+  def genGamePlanSnapshotId: ZIO[Any, Nothing, GamePlanSnapshotId] = gen(() => GamePlanSnapshotId.random())
+  def genTransferWindowId: ZIO[Any, Nothing, TransferWindowId]     = gen(() => TransferWindowId.random())
+  def genTransferOfferId: ZIO[Any, Nothing, TransferOfferId]       = gen(() => TransferOfferId.random())
+  def genBotId: ZIO[Any, Nothing, BotId]                           = gen(() => BotId.random())
+  def genLeagueContextId: ZIO[Any, Nothing, LeagueContextId]       = gen(() => LeagueContextId.random())
+  def genContractId: ZIO[Any, Nothing, ContractId]                 = gen(() => ContractId.random())
 }
 
 case class User(
@@ -58,7 +62,11 @@ case class League(
   startDate: Option[LocalDate],
   createdByUserId: UserId,
   createdAt: Instant,
-  timezone: ZoneId
+  timezone: ZoneId,
+  /** Np. "English" – grupowanie lig w system (4 szczeble). */
+  leagueSystemName: Option[String] = None,
+  /** 1 = Premier League, 2 = Championship, itd. */
+  tier: Option[Int] = None
 )
 
 case class Team(
@@ -95,6 +103,10 @@ case class Player(
   injury: Option[InjuryStatus],
   freshness: Double,
   morale: Double,
+  /** Kondycja 0–1 (spada w meczu, regeneruje się). */
+  condition: Double = 1.0,
+  /** Ostrość meczowa 0–1 (rośnie przy grze, spada przy braku minut). */
+  matchSharpness: Double = 1.0,
   createdAt: Instant
 )
 
@@ -194,7 +206,7 @@ case class MatchSummary(
   possessionLost: Option[(Int, Int)],
   vaepTotal: Option[(Double, Double)],
   wpaFinal: Option[Double],
-  /** Field Tilt: udział w kontaktach w tercji ataku (strefy 9–12). (homeShare, awayShare). */
+  /** Field Tilt: udział w kontaktach w tercji ataku. (homeShare, awayShare). */
   fieldTilt: Option[(Double, Double)] = None,
   /** PPDA w strefie budowania. (homePPDA, awayPPDA). */
   ppda: Option[(Double, Double)] = None,
@@ -202,11 +214,11 @@ case class MatchSummary(
   ballTortuosity: Option[Double] = None,
   /** Metabolic load (przybliżenie). */
   metabolicLoad: Option[Double] = None,
-  /** xT wartości stref 1–12 (value iteration). */
+  /** xT wartości stref 1–TotalZones (value iteration). */
   xtByZone: Option[List[Double]] = None,
   /** Kontuzje w meczu (gospodarze, goście). */
   injuries: (Int, Int) = (0, 0),
-  /** Voronoi-like: udział gospodarzy w akcjach w strefach 1–12 (lista 12 elem.). */
+  /** Voronoi-like: udział gospodarzy w akcjach per strefa. */
   homeShareByZone: Option[List[Double]] = None,
   /** I-VAEP: VAEP per typ zdarzenia per zawodnik (playerId -> eventType -> value). */
   vaepBreakdownByPlayer: Option[Map[String, Map[String, Double]]] = None,
@@ -216,13 +228,13 @@ case class MatchSummary(
   estimatedDistanceByPlayer: Option[Map[String, Double]] = None,
   /** Player Influence: akcje per strefa per zawodnik (playerId -> zone -> count). */
   influenceByPlayer: Option[Map[String, Map[String, Int]]] = None,
-  /** C-OBSO: średnia liczba obrońców w stożku per strefa 1–12. */
+  /** C-OBSO: średnia liczba obrońców w stożku per strefa. */
   avgDefendersInConeByZone: Option[List[Double]] = None,
-  /** C-OBSO: średnia odległość GK od bramki przy strzałach per strefa 1–12. */
+  /** C-OBSO: średnia odległość GK od bramki przy strzałach per strefa. */
   avgGkDistanceByZone: Option[List[Double]] = None,
-  /** Stałe fragmenty: aktywność stref per routine (klucz np. Corner:default -> lista 12 liczb). */
+  /** Stałe fragmenty: aktywność stref per routine. */
   setPieceZoneActivity: Option[Map[String, List[Int]]] = None,
-  /** Pressing w połowie przeciwnika (strefy 7–12) per zawodnik. */
+  /** Pressing w połowie przeciwnika per zawodnik. */
   pressingInOppHalfByPlayer: Option[Map[String, Int]] = None,
   /** Tortuosity biegów zawodników (ścieżka/odcinek) per zawodnik. */
   playerTortuosityByPlayer: Option[Map[String, Double]] = None,
@@ -238,7 +250,7 @@ case class MatchSummary(
   setPieceRoutineCluster: Option[Map[String, Int]] = None,
   /** Prognoza Poisson z xG: (P(wygrana gosp.), P(remis), P(wygrana gości)). */
   poissonPrognosis: Option[(Double, Double, Double)] = None,
-  /** Voronoi z centrum aktywności: strefa → udział gosp. (0 lub 1), lista 12. */
+  /** Voronoi z centrum aktywności: strefa → udział gosp. (0 lub 1). */
   voronoiCentroidByZone: Option[List[Double]] = None,
   /** xPass: wartość podań (xT odbiorcy − xT nadawcy) per zawodnik. */
   passValueByPlayer: Option[Map[String, Double]] = None,
@@ -249,7 +261,9 @@ case class MatchSummary(
   /** xPass under pressure per zawodnik. */
   passValueUnderPressureByPlayer: Option[Map[String, Double]] = None,
   /** Player Influence score (aktywność×xT) per zawodnik. */
-  influenceScoreByPlayer: Option[Map[String, Double]] = None
+  influenceScoreByPlayer: Option[Map[String, Double]] = None,
+  /** Najważniejsze momenty meczu (10–15) do wyświetlenia. */
+  highlights: Option[List[Map[String, String]]] = None
 )
 
 case class TransferWindow(
@@ -269,7 +283,20 @@ case class TransferOffer(
   amount: BigDecimal,
   status: TransferOfferStatus,
   createdAt: Instant,
-  respondedAt: Option[Instant]
+  respondedAt: Option[Instant],
+  counterAmount: Option[BigDecimal] = None
+)
+
+case class Contract(
+  id: ContractId,
+  playerId: PlayerId,
+  teamId: TeamId,
+  weeklySalary: BigDecimal,
+  startMatchday: Int,
+  endMatchday: Int,
+  signingBonus: BigDecimal = BigDecimal(0),
+  releaseClause: Option[BigDecimal] = None,
+  createdAt: Instant
 )
 
 case class MatchSquad(

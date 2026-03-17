@@ -181,18 +181,19 @@ object MatchDetailPage {
     }
   }
 
-  /** Press by zone: liczba akcji defensywnych (Tackle, PassIntercepted, DribbleLost) per strefa 1–12. */
+  /** Press by zone: liczba akcji defensywnych (Tackle, PassIntercepted, DribbleLost) per strefa. */
   private def buildPressByZone(matchDto: MatchDto, log: MatchLogDto): Element = {
     val homeId = matchDto.homeTeamId
     val awayId = matchDto.awayTeamId
     val defensiveTypes = Set("Tackle", "PassIntercepted", "DribbleLost")
-    val defensive = log.events.filter(e => defensiveTypes.contains(e.eventType) && e.zone.exists(z => z >= 1 && z <= 12))
+    val maxZone = log.events.flatMap(_.zone).maxOption.getOrElse(24)
+    val defensive = log.events.filter(e => defensiveTypes.contains(e.eventType) && e.zone.exists(z => z >= 1 && z <= maxZone))
     if (defensive.isEmpty) div()
     else {
-      val byZoneHome = (1 to 12).map(z => z -> defensive.count(e => e.zone.contains(z) && e.teamId.contains(homeId))).toMap
-      val byZoneAway = (1 to 12).map(z => z -> defensive.count(e => e.zone.contains(z) && e.teamId.contains(awayId))).toMap
+      val byZoneHome = (1 to maxZone).map(z => z -> defensive.count(e => e.zone.contains(z) && e.teamId.contains(homeId))).toMap
+      val byZoneAway = (1 to maxZone).map(z => z -> defensive.count(e => e.zone.contains(z) && e.teamId.contains(awayId))).toMap
       val maxV = (byZoneHome.values ++ byZoneAway.values).maxOption.getOrElse(1)
-      val bars = (1 to 12).map { z =>
+      val bars = (1 to maxZone).map { z =>
             val h = byZoneHome.getOrElse(z, 0)
             val a = byZoneAway.getOrElse(z, 0)
             val hPct = if (maxV > 0) (h.toDouble / maxV * 20).max(2) else 2
@@ -213,9 +214,9 @@ object MatchDetailPage {
     }
   }
 
-  /** Wykres słupkowy EPV/xT per strefa (1–12). */
+  /** Wykres słupkowy EPV/xT per strefa. */
   private def buildXtByZoneBarChart(xtByZone: List[Double]): Element = {
-    if (xtByZone.size != 12) div()
+    if (xtByZone.isEmpty) div()
     else {
       val maxV = xtByZone.maxOption.filter(_ > 0).getOrElse(0.01)
       val bars = xtByZone.zipWithIndex.map { case (v, i) =>
@@ -229,13 +230,13 @@ object MatchDetailPage {
       val flexAndBars = (cls := "flex gap-0.5 items-end") +: bars
       div(
         cls := "space-y-1 mt-2",
-        p(cls := "text-xs font-medium", "EPV/xT strefy 1–12 (wykres):"),
+        p(cls := "text-xs font-medium", s"EPV/xT strefy 1–${xtByZone.size} (wykres):"),
         div(flexAndBars: _*)
       )
     }
   }
 
-  def render(matchId: String, goBack: () => Unit): Element = {
+  def render(matchId: String, leagueId: String, teamIdOpt: Option[String], goBack: () => Unit): Element = {
     val matchData = Var[Option[MatchDto]](None)
     val logData = Var[Option[MatchLogDto]](None)
     val teams = Var[Map[String, String]](Map.empty)
@@ -316,10 +317,9 @@ object MatchDetailPage {
         case Left(m) => error.set(Some(m))
       }
     }
-    load()
-
     div(
       cls := "max-w-2xl mx-auto",
+      onMountCallback { _ => load() },
       button(
         cls := "mb-4 px-3 py-1 text-sm bg-gray-200 dark:bg-gray-700 rounded hover:bg-gray-300",
         "← Wstecz",
@@ -329,10 +329,10 @@ object MatchDetailPage {
         case Some(m) => div(cls := "text-red-600 mb-4", m)
         case None    => emptyNode
       },
-      child <-- matchData.signal.map {
-        case Some(m) =>
-          val homeName = teams.now().getOrElse(m.homeTeamId, m.homeTeamId)
-          val awayName = teams.now().getOrElse(m.awayTeamId, m.awayTeamId)
+      child <-- matchData.signal.combineWith(teams.signal).map {
+        case (Some(m), teamsMap) =>
+          val homeName = teamsMap.getOrElse(m.homeTeamId, m.homeTeamId)
+          val awayName = teamsMap.getOrElse(m.awayTeamId, m.awayTeamId)
           val scoreStr = (m.homeGoals, m.awayGoals) match {
             case (Some(h), Some(a)) => s"$h – $a"
             case _                  => "vs"
@@ -374,7 +374,7 @@ object MatchDetailPage {
                 button(
                   cls := "mb-4 px-4 py-2 bg-amber-600 text-white rounded hover:bg-amber-700",
                   "Ustaw skład",
-                  onClick --> { _ => myTeamIdOpt.foreach(tid => AppState.lineupContext.set(Some((matchId, tid)))) }
+                  onClick --> { _ => myTeamIdOpt.foreach(tid => AppState.currentPage.set(Page.LineupEditor(matchId, tid, m.leagueId))) }
                 )
               else emptyNode
             },
@@ -435,7 +435,7 @@ object MatchDetailPage {
                     cls := "mb-4 p-3 rounded bg-gray-100 dark:bg-gray-700 text-sm",
                     h3(cls := "font-medium mb-2", "Zapisane składy"),
                     byTeam.toList.sortBy(_._1).flatMap { case (tid, list) =>
-                      val teamName = teams.now().getOrElse(tid, tid)
+                      val teamName = teamsMap.getOrElse(tid, tid)
                       list.headOption.toList.map { s =>
                         val playersLine = s.lineup.map(slot => slot.playerId).mkString(", ")
                         val formationLabel = inferFormationFromSlots(s.lineup.map(_.positionSlot))
@@ -534,10 +534,11 @@ object MatchDetailPage {
                       div(mods: _*)
                     )
                   },
-                  (log.pressByZoneHome.filter(_.size == 12), log.pressByZoneAway.filter(_.size == 12)) match {
+                  (log.pressByZoneHome.filter(_.nonEmpty), log.pressByZoneAway.filter(_.nonEmpty)) match {
                     case (Some(homeZ), Some(awayZ)) =>
+                      val zoneCount = homeZ.size.min(awayZ.size)
                       val maxV = (homeZ ++ awayZ).maxOption.filter(_ > 0).getOrElse(1)
-                      val zoneBars = (1 to 12).toList.map { i =>
+                      val zoneBars = (1 to zoneCount).toList.map { i =>
                         val h = homeZ(i - 1)
                         val a = awayZ(i - 1)
                         val hPx = (h.toDouble / maxV * 32).max(0).min(32)
@@ -566,7 +567,11 @@ object MatchDetailPage {
             ),
             div(
               styleAttr <-- matchDetailTab.signal.map(t => if (t == "advanced") "display: block" else "display: none"),
-              child <-- logData.signal.map {
+              child <-- logData.signal.combineWith(playerTeamFilter.signal).combineWith(squads.signal).map { x =>
+              val logOpt: Option[MatchLogDto] = x._1
+              val teamFilter: String = x._2
+              val squadsOpt: Option[List[MatchSquadDto]] = x._3
+              logOpt match {
               case Some(log) if log.summary.nonEmpty =>
                 val s = log.summary.get
                 val hasAdvanced = s.ballTortuosity.nonEmpty || s.metabolicLoad.nonEmpty || s.xtByZone.nonEmpty || s.homeShareByZone.nonEmpty ||
@@ -577,7 +582,6 @@ object MatchDetailPage {
                   s.voronoiCentroidByZone.nonEmpty || s.passValueByPlayer.nonEmpty || s.passValueTotal.nonEmpty || s.passValueUnderPressureTotal.nonEmpty || s.passValueUnderPressureByPlayer.nonEmpty || s.influenceScoreByPlayer.nonEmpty
                 if (!hasAdvanced) emptyNode
                 else {
-                  val squadsOpt = squads.now()
                   val (homePlayerIds, awayPlayerIds) = squadsOpt match {
                     case Some(list) =>
                       val homeIds = list.find(_.teamId == m.homeTeamId).map(_.lineup.map(_.playerId).toSet).getOrElse(Set.empty[String])
@@ -591,7 +595,7 @@ object MatchDetailPage {
                   p(cls := "text-xs text-slate-500", "EPV = Expected Possession Value (wartość stref). OBV w podsumowaniu = VAEP. Karne: mieszane strategie Nash (kierunek L/R)."),
                   s.ballTortuosity.fold(emptyNode)(t => p(s"Tortuosity ścieżki piłki (gBRI): ${f"$t%.2f"}")),
                   s.metabolicLoad.fold(emptyNode)(m => p(s"Metabolic load (przybł.): ${f"$m%.0f"} m")),
-                  s.xtByZone.filter(_.size == 12).fold(emptyNode)(xt => {
+                  s.xtByZone.filter(_.nonEmpty).fold(emptyNode)(xt => {
                     val maxV = xt.maxOption.getOrElse(0.01)
                     val bars = xt.zipWithIndex.map { case (v, i) => s"${i + 1}:${"=" * (math.round(v / maxV * 8).toInt.min(20))} ${f"$v%.2f"}" }.mkString(" | ")
                     div(
@@ -599,7 +603,7 @@ object MatchDetailPage {
                       buildXtByZoneBarChart(xt)
                     )
                   }),
-                  s.homeShareByZone.filter(_.size == 12).fold(emptyNode)(vor => p(s"Voronoi (udział gosp. w strefach 1–12): ${vor.map(v => f"${v * 100}%.0f%%").mkString(", ")}")),
+                  s.homeShareByZone.filter(_.nonEmpty).fold(emptyNode)(vor => p(s"Voronoi (udział gosp. w strefach 1–${vor.size}): ${vor.map(v => f"${v * 100}%.0f%%").mkString(", ")}")),
                   s.pressingByPlayer.filter(_.nonEmpty).fold(emptyNode)(m => p(s"Pressing (akcje defensywne): ${m.toList.sortBy(-_._2).take(5).map { case (pid, n) => s"$pid: $n" }.mkString(", ")}")),
                   s.estimatedDistanceByPlayer.filter(_.nonEmpty).fold(emptyNode)(m => p(s"Dystans szac. (m): ${m.toList.sortBy(-_._2).take(5).map { case (pid, d) => s"$pid: ${f"$d%.0f"}" }.mkString(", ")}")),
                   s.vaepBreakdownByPlayer.filter(_.nonEmpty).fold(emptyNode)(m => {
@@ -626,8 +630,8 @@ object MatchDetailPage {
                     }.mkString("; ")
                     p(s"Player Influence (top strefy per gracz): $lines")
                   }),
-                  (s.avgDefendersInConeByZone.filter(_.size == 12), s.avgGkDistanceByZone.filter(_.size == 12)) match {
-                    case (Some(defs), Some(gk)) => p(s"C-OBSO (kontekst strzałów): obrońcy w stożku strefy 1–12: ${defs.map(d => f"$d%.1f").mkString(", ")}; odl. GK: ${gk.map(g => f"$g%.0f").mkString(", ")} m")
+                  (s.avgDefendersInConeByZone.filter(_.nonEmpty), s.avgGkDistanceByZone.filter(_.nonEmpty)) match {
+                    case (Some(defs), Some(gk)) => p(s"C-OBSO (kontekst strzałów): obrońcy w stożku strefy 1–${defs.size}: ${defs.map(d => f"$d%.1f").mkString(", ")}; odl. GK: ${gk.map(g => f"$g%.0f").mkString(", ")} m")
                     case _ => emptyNode
                   },
                   s.setPieceZoneActivity.filter(_.nonEmpty).fold(emptyNode)(m => p(s"Stałe fragmenty (aktywność stref per routine): ${m.keys.mkString(", ")}")),
@@ -638,7 +642,7 @@ object MatchDetailPage {
                   s.setPiecePatternW.filter(_.nonEmpty).fold(emptyNode)(w => p(s"NMF wzorce (wagi 2 komponentów per routine): ${w.keys.mkString(", ")}")),
                   s.setPieceRoutineCluster.filter(_.nonEmpty).fold(emptyNode)(cl => p(s"Stałe fragmenty – klaster (0/1) per routine: ${cl.map { case (k, v) => s"$k→$v" }.mkString(", ")}")),
                   s.poissonPrognosis.filter(_.size >= 3).fold(emptyNode)(list => p(s"Prognoza Poisson (xG): P(wygrana gosp.) ${f"${list(0) * 100}%.0f%%"}, P(remis) ${f"${list(1) * 100}%.0f%%"}, P(wygrana gości) ${f"${list(2) * 100}%.0f%%"}")),
-                  s.voronoiCentroidByZone.filter(_.size == 12).fold(emptyNode)(vor => p(s"Voronoi (centrum aktywności, strefy 1–12): ${vor.map(v => if (v >= 0.5) "G" else "A").mkString}")),
+                  s.voronoiCentroidByZone.filter(_.nonEmpty).fold(emptyNode)(vor => p(s"Voronoi (centrum aktywności, strefy 1–${vor.size}): ${vor.map(v => if (v >= 0.5) "G" else "A").mkString}")),
                   s.passValueTotal.filter(_.size >= 2).fold(emptyNode)(pv => p(s"xPass suma (gosp.–goście): ${f"${pv(0)}%.2f"} – ${f"${pv(1)}%.2f"}")),
                   s.passValueByPlayer.filter(_.nonEmpty).fold(emptyNode)(m => p(s"xPass (top 5): ${m.toList.sortBy(-_._2).take(5).map { case (pid, v) => s"$pid: ${f"$v%.2f"}" }.mkString(", ")}")),
                   s.passValueUnderPressureTotal.filter(_.size >= 2).fold(emptyNode)(pv => p(s"xPass under pressure (gosp.–goście): ${f"${pv(0)}%.2f"} – ${f"${pv(1)}%.2f"}")),
@@ -659,11 +663,11 @@ object MatchDetailPage {
                       onChange.mapToValue --> playerTeamFilter.writer
                     )
                   ),
-                  buildPerPlayerTable(s, playerTeamFilter.now(), homePlayerIds, awayPlayerIds)
+                  buildPerPlayerTable(s, teamFilter, homePlayerIds, awayPlayerIds)
                 )
               }
               case _ => emptyNode
-            }
+            }}
             ),
             div(
               styleAttr <-- matchDetailTab.signal.map(t => if (t == "events") "display: block" else "display: none"),
@@ -724,7 +728,7 @@ object MatchDetailPage {
             }
             )
           )
-        case None => div(cls := "text-gray-500", "Ładowanie...")
+        case (None, _) => div(cls := "text-gray-500", "Ładowanie...")
       }
     )
   }

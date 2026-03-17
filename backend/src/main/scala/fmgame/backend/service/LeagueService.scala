@@ -19,7 +19,7 @@ import scala.util.Random
 import io.circe.parser.decode
 import io.circe.generic.auto._
 
-trait LeagueService {
+trait LeagueService extends MatchService with TransferService with ScoutingService with ExportService {
   def create(name: String, teamCount: Int, myTeamName: String, timezone: String, creatorUserId: UserId): ZIO[Any, String, (LeagueDto, TeamDto)]
   def getById(leagueId: LeagueId): ZIO[Any, String, LeagueDto]
   /** League by id with access check: fails with "Forbidden" if user has no team in league. */
@@ -40,15 +40,6 @@ trait LeagueService {
   def getFixturesForUser(leagueId: LeagueId, limitOpt: Option[Int], offsetOpt: Option[Int], userId: UserId): ZIO[Any, String, List[MatchDto]]
   def addBots(leagueId: LeagueId, userId: UserId, count: Int): ZIO[Any, String, Unit]
   def playMatchday(leagueId: LeagueId, userId: UserId): ZIO[Any, String, Unit]
-  def getMatch(matchId: MatchId): ZIO[Any, String, MatchDto]
-  /** Match with access check (user must have team in match's league). */
-  def getMatchForUser(matchId: MatchId, userId: UserId): ZIO[Any, String, MatchDto]
-  def getMatchLog(matchId: MatchId, limitOpt: Option[Int], offsetOpt: Option[Int]): ZIO[Any, String, MatchLogDto]
-  def getMatchLogForUser(matchId: MatchId, limitOpt: Option[Int], offsetOpt: Option[Int], userId: UserId): ZIO[Any, String, MatchLogDto]
-  def getMatchSquads(matchId: MatchId): ZIO[Any, String, List[MatchSquadDto]]
-  def getMatchSquadsForUser(matchId: MatchId, userId: UserId): ZIO[Any, String, List[MatchSquadDto]]
-  /** Rada asystenta przed meczem (formacja rywala, sugestie pressing). teamId = drużyna użytkownika. */
-  def getAssistantTipForUser(matchId: MatchId, teamId: TeamId, userId: UserId): ZIO[Any, String, AssistantTipDto]
   def getTeam(teamId: TeamId): ZIO[Any, String, TeamDto]
   /** Team with access check. */
   def getTeamForUser(teamId: TeamId, userId: UserId): ZIO[Any, String, TeamDto]
@@ -58,24 +49,10 @@ trait LeagueService {
   def getTeamGamePlansForUser(teamId: TeamId, userId: UserId): ZIO[Any, String, List[GamePlanSnapshotDto]]
   def getGamePlanSnapshot(teamId: TeamId, snapshotId: GamePlanSnapshotId): ZIO[Any, String, GamePlanSnapshotDetailDto]
   def getGamePlanSnapshotForUser(teamId: TeamId, snapshotId: GamePlanSnapshotId, userId: UserId): ZIO[Any, String, GamePlanSnapshotDetailDto]
-  def getTransferWindows(leagueId: LeagueId): ZIO[Any, String, List[TransferWindowDto]]
-  def getTransferWindowsForUser(leagueId: LeagueId, userId: UserId): ZIO[Any, String, List[TransferWindowDto]]
-  def getTransferOffers(leagueId: LeagueId, teamIdOpt: Option[TeamId]): ZIO[Any, String, List[TransferOfferDto]]
-  def getTransferOffersForUser(leagueId: LeagueId, teamIdOpt: Option[TeamId], userId: UserId): ZIO[Any, String, List[TransferOfferDto]]
-  def createTransferOffer(leagueId: LeagueId, userId: UserId, req: CreateTransferOfferRequest): ZIO[Any, String, TransferOfferDto]
-  def acceptTransferOffer(offerId: TransferOfferId, userId: UserId): ZIO[Any, String, Unit]
-  def rejectTransferOffer(offerId: TransferOfferId, userId: UserId): ZIO[Any, String, Unit]
-  def submitMatchSquad(matchId: MatchId, teamId: TeamId, userId: UserId, req: SubmitMatchSquadRequest): ZIO[Any, String, MatchSquadDto]
   def updatePlayer(playerId: PlayerId, userId: UserId, req: UpdatePlayerRequest): ZIO[Any, String, PlayerDto]
   def saveGamePlan(teamId: TeamId, userId: UserId, name: String, gamePlanJson: String): ZIO[Any, String, GamePlanSnapshotDto]
   /** Called by scheduler: play matchdays that are due (17:00 Wed/Sat in league timezone). */
   def runScheduledMatchdays(): ZIO[Any, Nothing, Unit]
-  /** Eksport logów meczów do CSV lub StatsBomb-like JSON (pod trenowanie xG/VAEP w Pythonie). Maks. 50 meczów; tylko mecze z lig użytkownika. eventTypesOpt: gdy podane, eksport tylko zdarzeń o typie z listy. */
-  def exportMatchLogs(matchIds: List[MatchId], format: String, userId: UserId, eventTypesOpt: Option[List[String]] = None): ZIO[Any, String, String]
-  /** Eksport z opcjonalnymi filtrami: gdy leagueId + (fromMatchday/toMatchday/teamId), matchIds są uzupełniane z terminarza ligi. eventTypes: gdy podane, eksport tylko zdarzeń o typie z listy. */
-  def exportMatchLogsWithFilters(matchIds: List[MatchId], format: String, userId: UserId, leagueIdOpt: Option[LeagueId], fromMatchdayOpt: Option[Int], toMatchdayOpt: Option[Int], teamIdOpt: Option[TeamId], eventTypesOpt: Option[List[String]]): ZIO[Any, String, String]
-  /** Wgrywanie modelu xG/VAEP (plik .onnx lub .json); przełączenie silnika bez redeployu. */
-  def uploadEngineModel(kind: String, contentType: String, body: Array[Byte]): ZIO[Any, String, Unit]
   /** Statystyki sezonowe zawodników w lidze (król strzelców, lider asyst) z kontrolą dostępu. */
   def getLeaguePlayerStatsForUser(leagueId: LeagueId, userId: UserId): ZIO[Any, String, LeaguePlayerStatsDto]
   /** Zaawansowane statystyki sezonowe zawodników w lidze (Data Hub light). */
@@ -93,15 +70,22 @@ trait LeagueService {
 
   /** Scouting / recruitment (MVP). */
   def listLeaguePlayersForUser(leagueId: LeagueId, userId: UserId, posOpt: Option[String], minOverallOpt: Option[Double], qOpt: Option[String]): ZIO[Any, String, LeaguePlayersDto]
-  def getShortlistForUser(teamId: TeamId, userId: UserId): ZIO[Any, String, List[ShortlistEntryDto]]
-  def addToShortlistForUser(teamId: TeamId, userId: UserId, playerId: PlayerId): ZIO[Any, String, Unit]
-  def removeFromShortlistForUser(teamId: TeamId, userId: UserId, playerId: PlayerId): ZIO[Any, String, Unit]
-  def listScoutingReportsForUser(teamId: TeamId, userId: UserId): ZIO[Any, String, List[ScoutingReportDto]]
-  def createScoutingReportForUser(teamId: TeamId, userId: UserId, playerId: PlayerId, rating: Double, notes: String): ZIO[Any, String, ScoutingReportDto]
-  /** Konferencja prasowa po meczu: wybór tonu wpływa na morale drużyny. */
-  def applyPressConference(matchId: MatchId, teamId: TeamId, userId: UserId, phase: String, tone: String): ZIO[Any, String, Unit]
   /** Metryki dla endpointu /metrics (monitoring). */
   def getMetrics: ZIO[Any, Nothing, MetricsDto]
+  /** Tworzy system ligi angielskiej (4 szczeble: Premier, Championship, League One, League Two) z 92 drużynami i graczami. Zwraca (wszystkie 4 ligi, liga użytkownika, drużyna użytkownika). */
+  def createEnglishLeagueSystem(creatorUserId: UserId, myTeamName: String): ZIO[Any, String, (List[LeagueDto], LeagueDto, TeamDto)]
+  /** Uruchamia sezon we wszystkich ligach danego systemu (np. "English"). */
+  def startSeasonForSystem(systemName: String, userId: UserId): ZIO[Any, String, Unit]
+  /** Awans/spadek: po zakończeniu sezonu we wszystkich ligach systemu przenosi drużyny (3 ostatnie → niżej, 3 pierwsze → wyżej). */
+  def applyPromotionRelegation(systemName: String, userId: UserId): ZIO[Any, String, Unit]
+  /** Po awansie/spadku: resetuje terminarze i uruchamia nowy sezon we wszystkich ligach systemu (nowe kolejki, okna transferowe). */
+  def startNextSeasonForSystem(systemName: String, userId: UserId): ZIO[Any, String, Unit]
+  /** Baraże: tworzy półfinały (3. vs 6., 4. vs 5.) – tylko ligi tier 2–4. */
+  def createPlayOffSemiFinals(leagueId: LeagueId, userId: UserId): ZIO[Any, String, Unit]
+  /** Baraże: tworzy finał (zwycięzcy półfinałów) – tylko ligi tier 2–4. */
+  def createPlayOffFinal(leagueId: LeagueId, userId: UserId): ZIO[Any, String, Unit]
+  /** Kontrakty drużyny (z nazwą zawodnika) – tylko właściciel. */
+  def getTeamContractsForUser(teamId: TeamId, userId: UserId): ZIO[Any, String, List[ContractDto]]
 }
 
 case class LeagueServiceLive(
@@ -122,18 +106,37 @@ case class LeagueServiceLive(
   shortlistRepo: ShortlistRepository,
   scoutingReportRepo: ScoutingReportRepository,
   leaguePlayerMatchStatsRepo: LeaguePlayerMatchStatsRepository,
+  contractRepo: ContractRepository,
   engine: MatchEngine,
   engineModelsRef: zio.Ref[EngineModels],
   xa: doobie.Transactor[zio.Task]
 ) extends LeagueService {
 
-  private def connUnit: ConnectionIO[Unit] = sql"SELECT 1".query[Int].unique.map(_ => ())
+  private val matchdayLocks = new java.util.concurrent.ConcurrentHashMap[String, zio.Semaphore]()
+  private def withMatchdayLock[R, E, A](leagueId: LeagueId)(effect: ZIO[R, E, A]): ZIO[R, E, A] =
+    for {
+      sem <- zio.Semaphore.make(1).map { newSem =>
+        val existing = matchdayLocks.putIfAbsent(leagueId.value, newSem)
+        if (existing != null) existing else newSem
+      }
+      result <- sem.withPermit(effect)
+    } yield result
+
+  private val pressConferenceGiven = {
+    val maxEntries = 10000
+    java.util.Collections.synchronizedMap(new java.util.LinkedHashMap[(String, String, String), Boolean](256, 0.75f, true) {
+      override def removeEldestEntry(eldest: java.util.Map.Entry[(String, String, String), Boolean]): Boolean = size > maxEntries
+    })
+  }
+  private val connUnit: ConnectionIO[Unit] = cats.Applicative[ConnectionIO].pure(())
   private def traverseConn[A, B](as: List[A])(f: A => ConnectionIO[B]): ConnectionIO[List[B]] =
-    as.foldRight(sql"SELECT 1".query[Int].unique.map(_ => List.empty[B]))((a, acc) => f(a).flatMap(b => acc.map(b :: _)))
+    as.foldRight(cats.Applicative[ConnectionIO].pure(List.empty[B]))((a, acc) => f(a).flatMap(b => acc.map(b :: _)))
 
   def create(name: String, teamCount: Int, myTeamName: String, timezone: String, creatorUserId: UserId): ZIO[Any, String, (LeagueDto, TeamDto)] =
     for {
-      _ <- ZIO.fail("teamCount must be even between 10 and 20").when(teamCount < 10 || teamCount > 20 || teamCount % 2 != 0)
+      _ <- ZIO.fail("League name must be 1-100 characters").when(name.trim.isEmpty || name.trim.length > 100)
+      _ <- ZIO.fail("Team name must be 1-100 characters").when(myTeamName.trim.isEmpty || myTeamName.trim.length > 100)
+      _ <- ZIO.fail("teamCount must be even between 10 and 24").when(teamCount < 10 || teamCount > 24 || teamCount % 2 != 0)
       leagueId <- IdGen.genLeagueId
       teamId <- IdGen.genTeamId
       totalMatchdays = 2 * (teamCount - 1)
@@ -162,11 +165,218 @@ case class LeagueServiceLive(
         createdAt = Instant.now(),
         managerName = None
       )
-      _ <- leagueRepo.create(league).transact(xa).orDie
-      _ <- teamRepo.create(team).transact(xa).orDie
+      _ <- {
+        import cats.implicits.*
+        (leagueRepo.create(league) *> teamRepo.create(team)).transact(xa).orDie
+      }
       leagueDto = toLeagueDto(league)
       teamDto = toTeamDto(team)
     } yield (leagueDto, teamDto)
+
+  def createEnglishLeagueSystem(creatorUserId: UserId, myTeamName: String): ZIO[Any, String, (List[LeagueDto], LeagueDto, TeamDto)] = {
+    Ref.make(0).flatMap { nameOffsetRef =>
+      def nextNameIdx(): ZIO[Any, Nothing, Int] = nameOffsetRef.modify(n => (n, n + 1))
+      (for {
+        _ <- ZIO.fail("Team name must be 1-100 characters").when(myTeamName.trim.isEmpty || myTeamName.trim.length > 100)
+        tz = ZoneId.of("Europe/London")
+        seed = ("English" + creatorUserId.value).hashCode.toLong
+        rng = new Random(seed)
+        leaguesAndUser <- ZIO.foldLeft(EnglishLeaguePreset.englishLeagueTiers.zipWithIndex)((List.empty[LeagueDto], Option.empty[LeagueDto], Option.empty[TeamDto])) { case ((leagueDtos, userLeagueOpt, userTeamOpt), ((leagueName, teamCount), tierIdx)) =>
+          for {
+            leagueId <- IdGen.genLeagueId
+            totalMatchdays = 2 * (teamCount - 1)
+            league = League(
+              id = leagueId,
+              name = leagueName,
+              teamCount = teamCount,
+              currentMatchday = 0,
+              totalMatchdays = totalMatchdays,
+              seasonPhase = SeasonPhase.Setup,
+              homeAdvantage = 1.05,
+              startDate = None,
+              createdByUserId = creatorUserId,
+              createdAt = Instant.now(),
+              timezone = tz,
+              leagueSystemName = Some("English"),
+              tier = Some(tierIdx + 1)
+            )
+            _ <- leagueRepo.create(league).transact(xa).orDie
+            isPremier = tierIdx == 0
+            teamIds <- ZIO.foreach(0 until teamCount)(_ => IdGen.genTeamId)
+            botIds <- ZIO.foreach(0 until (if (isPremier) teamCount - 1 else teamCount))(_ => IdGen.genBotId)
+            names <- ZIO.foreach(0 until teamCount) { i =>
+              if (isPremier && i == 0) ZIO.succeed(myTeamName.trim)
+              else nextNameIdx().map(idx => EnglishLeaguePreset.nameForIndex(idx))
+            }
+            teams = (0 until teamCount).map { i =>
+              val teamId = teamIds(i)
+              if (isPremier && i == 0)
+                Team(teamId, leagueId, names(i), TeamOwnerType.Human, Some(creatorUserId), None, BigDecimal(1000000), None, Instant.now(), managerName = None)
+              else {
+                val botIdx = if (isPremier) i - 1 else i
+                Team(teamId, leagueId, names(i), TeamOwnerType.Bot, None, Some(botIds(botIdx)), BigDecimal(500_000 + rng.nextInt(1_500_001)), None, Instant.now(), managerName = Some(s"Manager ${i + 1}"))
+              }
+            }.toList
+            _ <- { import cats.implicits.*; teams.traverse_(t => teamRepo.create(t)).transact(xa).orDie }
+            allSquads = teams.flatMap(t => PlayerGenerator.generateSquad(t.id, rng))
+            _ <- {
+              import cats.implicits.*
+              (for {
+                _ <- allSquads.traverse_(p => playerRepo.create(p))
+                _ <- teams.traverse_ { t =>
+                  val squad = allSquads.filter(_.teamId == t.id)
+                  val contracts = PlayerGenerator.generateInitialContracts(squad, t.id, totalMatchdays)
+                  contracts.traverse_(c => contractRepo.create(c))
+                }
+              } yield ()).transact(xa).orDie
+            }
+            newDtos = leagueDtos :+ toLeagueDto(league)
+            (uLeague, uTeam) = if (isPremier) (Some(toLeagueDto(league)), Some(toTeamDto(teams.head))) else (userLeagueOpt, userTeamOpt)
+          } yield (newDtos, uLeague, uTeam)
+        }
+        (list, uL, uT) = leaguesAndUser
+        userLeague <- ZIO.fromOption(uL).orElseFail("English system has no Premier League")
+        userTeam <- ZIO.fromOption(uT).orElseFail("User team not found")
+      } yield (list, userLeague, userTeam))
+    }
+  }
+
+  def startSeasonForSystem(systemName: String, userId: UserId): ZIO[Any, String, Unit] =
+    for {
+      leagues <- leagueRepo.listByLeagueSystemName(systemName).transact(xa).orDie
+      _ <- ZIO.fail(s"No leagues found for system: $systemName").when(leagues.isEmpty)
+      _ <- ZIO.foreachDiscard(leagues)(league => startSeason(league.id, userId, None).unit)
+    } yield ()
+
+  def applyPromotionRelegation(systemName: String, userId: UserId): ZIO[Any, String, Unit] =
+    for {
+      leagues <- leagueRepo.listByLeagueSystemName(systemName).transact(xa).orDie
+      _ <- ZIO.fail(s"No leagues found for system: $systemName").when(leagues.isEmpty)
+      sorted = leagues.filter(_.tier.nonEmpty).sortBy(_.tier.get)
+      _ <- ZIO.fail("All leagues in system must have tier set").when(sorted.size != leagues.size)
+      _ <- ZIO.fail("Season not finished in all leagues").when(
+        sorted.exists(l => l.currentMatchday < l.totalMatchdays)
+      )
+      _ <- ZIO.foreachDiscard(0 until (sorted.size - 1)) { idx =>
+        val upperLeague = sorted(idx)
+        val lowerLeague = sorted(idx + 1)
+        for {
+          upperTable <- getTable(upperLeague.id)
+          lowerTable <- getTable(lowerLeague.id)
+          numPromoted = 3
+          relegated = upperTable.takeRight(numPromoted).map(r => TeamId(r.teamId))
+          promoted = lowerTable.take(numPromoted).map(r => TeamId(r.teamId))
+          _ <- ZIO.fail(s"Not enough teams for promotion/relegation: ${upperLeague.name} / ${lowerLeague.name}").when(
+            relegated.size < numPromoted || promoted.size < numPromoted
+          )
+          _ <- {
+            import cats.implicits.*
+            (for {
+              _ <- relegated.traverse_(tid => teamRepo.updateLeagueId(tid, lowerLeague.id))
+              _ <- promoted.traverse_(tid => teamRepo.updateLeagueId(tid, upperLeague.id))
+            } yield ()).transact(xa).orDie
+          }
+        } yield ()
+      }
+      _ <- ZIO.logInfo(s"Promotion/relegation applied for system: $systemName")
+    } yield ()
+
+  def startNextSeasonForSystem(systemName: String, userId: UserId): ZIO[Any, String, Unit] =
+    for {
+      leagues <- leagueRepo.listByLeagueSystemName(systemName).transact(xa).orDie
+      _ <- ZIO.fail(s"No leagues found for system: $systemName").when(leagues.isEmpty)
+      _ <- ZIO.fail("Season not finished in all leagues").when(
+        leagues.exists(l => l.currentMatchday < l.totalMatchdays)
+      )
+      _ <- ZIO.foreachDiscard(leagues) { league =>
+        val rng = new Random(league.id.value.hashCode)
+        for {
+          teams <- teamRepo.listByLeague(league.id).transact(xa).orDie
+          _ <- ZIO.fail(s"League ${league.name}: teams count mismatch").when(teams.size != league.teamCount)
+          referees <- refereeRepo.listByLeague(league.id).transact(xa).orDie
+          _ <- {
+            import cats.implicits.*
+            (for {
+              _ <- leaguePlayerMatchStatsRepo.deleteByLeague(league.id)
+              _ <- matchRepo.deleteByLeague(league.id)
+              _ <- transferOfferRepo.deleteByLeague(league.id)
+              _ <- transferWindowRepo.deleteByLeague(league.id)
+            } yield ()).transact(xa).orDie
+          }
+          startDate = nextWedOrSat(LocalDate.now(league.timezone))
+          teamIds = teams.map(_.id)
+          matches = FixtureGenerator.generate(league.id, teamIds, referees, startDate, league.timezone, rng)
+          transferWindowIds <- ZIO.foreach((2 to (league.totalMatchdays - 2) by 2).toList)(_ => IdGen.genTransferWindowId)
+          transferWindows = transferWindowIds.zip((2 to (league.totalMatchdays - 2) by 2).toList).map { case (twId, k) =>
+            TransferWindow(twId, league.id, k, k + 2, TransferWindowStatus.Closed)
+          }
+          _ <- {
+            import cats.implicits.*
+            (for {
+              _ <- matches.traverse_(m => matchRepo.create(m))
+              _ <- transferWindows.traverse_(tw => transferWindowRepo.create(tw))
+              _ <- leagueRepo.update(league.copy(
+                currentMatchday = 0,
+                startDate = Some(startDate),
+                seasonPhase = SeasonPhase.InProgress
+              ))
+            } yield ()).transact(xa).orDie
+          }
+        } yield ()
+      }
+      _ <- ZIO.logInfo(s"Next season started for system: $systemName")
+    } yield ()
+
+  def createPlayOffSemiFinals(leagueId: LeagueId, userId: UserId): ZIO[Any, String, Unit] =
+    ensureUserHasAccessToLeague(userId, leagueId) *> (for {
+      leagueOpt <- leagueRepo.findById(leagueId).transact(xa).orDie
+      league <- ZIO.fromOption(leagueOpt).orElseFail("League not found")
+      _ <- ZIO.fail("Baraże tylko dla lig tier 2–4").when(!league.tier.exists(t => t >= 2 && t <= 4))
+      _ <- ZIO.fail("Sezon musi być zakończony").when(league.currentMatchday < league.totalMatchdays)
+      existing <- matchRepo.listByLeagueAndMatchday(leagueId, league.totalMatchdays + 1).transact(xa).orDie
+      _ <- ZIO.fail("Półfinały baraży już utworzone").when(existing.nonEmpty)
+      table <- getTable(leagueId)
+      _ <- ZIO.fail("Tabela musi mieć co najmniej 6 drużyn").when(table.size < 6)
+      pos3 = TeamId(table(2).teamId)
+      pos4 = TeamId(table(3).teamId)
+      pos5 = TeamId(table(4).teamId)
+      pos6 = TeamId(table(5).teamId)
+      referees <- refereeRepo.listByLeague(leagueId).transact(xa).orDie
+      _ <- ZIO.fail("Brak sędziów w lidze").when(referees.size < 2)
+      semiDate = nextWedOrSat(LocalDate.now(league.timezone).plusDays(7))
+      at17 = semiDate.atTime(java.time.LocalTime.of(17, 0)).atZone(league.timezone).toInstant
+      id1 <- IdGen.genMatchId
+      id2 <- IdGen.genMatchId
+      m1 = Match(id1, leagueId, league.totalMatchdays + 1, pos3, pos6, at17, MatchStatus.Scheduled, None, None, referees(0).id, None)
+      m2 = Match(id2, leagueId, league.totalMatchdays + 1, pos4, pos5, at17, MatchStatus.Scheduled, None, None, referees(1).id, None)
+      _ <- (for { _ <- matchRepo.create(m1); _ <- matchRepo.create(m2) } yield ()).transact(xa).orDie
+      _ <- ZIO.logInfo(s"Play-off semi-finals created for league ${league.name}")
+    } yield ()).tapError(e => ZIO.logWarning(s"createPlayOffSemiFinals: $e"))
+
+  def createPlayOffFinal(leagueId: LeagueId, userId: UserId): ZIO[Any, String, Unit] =
+    ensureUserHasAccessToLeague(userId, leagueId) *> (for {
+      leagueOpt <- leagueRepo.findById(leagueId).transact(xa).orDie
+      league <- ZIO.fromOption(leagueOpt).orElseFail("League not found")
+      _ <- ZIO.fail("Baraże tylko dla lig tier 2–4").when(!league.tier.exists(t => t >= 2 && t <= 4))
+      semiMatches <- matchRepo.listByLeagueAndMatchday(leagueId, league.totalMatchdays + 1).transact(xa).orDie
+      _ <- ZIO.fail("Najpierw rozegraj półfinały baraży").when(semiMatches.size != 2)
+      _ <- ZIO.fail("Oba półfinały muszą być rozegrane").when(semiMatches.exists(_.status != MatchStatus.Played))
+      winners = semiMatches.flatMap { m =>
+        val (h, a) = (m.homeGoals.getOrElse(0), m.awayGoals.getOrElse(0))
+        if (h > a) Some(m.homeTeamId) else if (a > h) Some(m.awayTeamId) else None
+      }
+      _ <- ZIO.fail("Oba półfinały muszą mieć zwycięzcę (bez remisów)").when(winners.size != 2)
+      existingFinal <- matchRepo.listByLeagueAndMatchday(leagueId, league.totalMatchdays + 2).transact(xa).orDie
+      _ <- ZIO.fail("Finał baraży już utworzony").when(existingFinal.nonEmpty)
+      refs <- refereeRepo.listByLeague(leagueId).transact(xa).orDie
+      _ <- ZIO.fail("Brak sędziego").when(refs.isEmpty)
+      finalDate = nextWedOrSat(LocalDate.now(league.timezone).plusDays(14))
+      at17 = finalDate.atTime(java.time.LocalTime.of(17, 0)).atZone(league.timezone).toInstant
+      id <- IdGen.genMatchId
+      finalMatch = Match(id, leagueId, league.totalMatchdays + 2, winners(0), winners(1), at17, MatchStatus.Scheduled, None, None, refs(0).id, None)
+      _ <- matchRepo.create(finalMatch).transact(xa).orDie
+      _ <- ZIO.logInfo(s"Play-off final created for league ${league.name}")
+    } yield ()).tapError(e => ZIO.logWarning(s"createPlayOffFinal: $e"))
 
   def getById(leagueId: LeagueId): ZIO[Any, String, LeagueDto] =
     leagueRepo.findById(leagueId).transact(xa).orDie.flatMap {
@@ -176,9 +386,11 @@ case class LeagueServiceLive(
 
   /** Fails with "Forbidden" if user has no team in the league. */
   private def ensureUserHasAccessToLeague(userId: UserId, leagueId: LeagueId): ZIO[Any, String, Unit] =
-    leagueRepo.listByUser(userId).transact(xa).orDie.flatMap { leagues =>
-      if (leagues.exists(_.id == leagueId)) ZIO.unit else ZIO.fail("Forbidden")
-    }
+    sql"SELECT 1 FROM teams WHERE league_id = ${leagueId.value} AND owner_user_id = ${userId.value} LIMIT 1"
+      .query[Int].option.transact(xa).orDie.flatMap {
+        case Some(_) => ZIO.unit
+        case None    => ZIO.fail("Forbidden")
+      }
 
   def getLeagueForUser(leagueId: LeagueId, userId: UserId): ZIO[Any, String, LeagueDto] =
     ensureUserHasAccessToLeague(userId, leagueId) *> getById(leagueId)
@@ -251,7 +463,7 @@ case class LeagueServiceLive(
       invitedUser <- ZIO.fromOption(invitedOpt).orElseFail("No user with this email")
       count <- teamRepo.countByLeague(leagueId).transact(xa).orDie
       _ <- ZIO.fail("League has no free slots").when(count >= league.teamCount)
-      token = java.util.UUID.randomUUID().toString
+      token = IdGen.token
       expiresAt = Instant.now().plus(7, ChronoUnit.DAYS)
       id <- IdGen.genInvitationId
       inv = Invitation(
@@ -272,37 +484,37 @@ case class LeagueServiceLive(
       _.map(inv => InvitationDto(inv.id.value, inv.leagueId.value, inv.invitedUserId.value, Some(inv.invitedByUserId.value), inv.token, inv.status.toString, inv.expiresAt.toEpochMilli))
     }
 
-  def acceptInvitation(token: String, teamName: String, userId: UserId): ZIO[Any, String, (LeagueDto, TeamDto)] =
+  def acceptInvitation(token: String, teamName: String, userId: UserId): ZIO[Any, String, (LeagueDto, TeamDto)] = {
+    val me = MonadError[ConnectionIO, Throwable]
+    def require[A](opt: Option[A], msg: String): ConnectionIO[A] =
+      opt.fold(me.raiseError[A](new RuntimeException(msg)))(me.pure(_))
+    def guard(cond: Boolean, msg: String): ConnectionIO[Unit] =
+      if (cond) me.raiseError(new RuntimeException(msg)) else me.pure(())
+
     for {
-      invOpt <- invitationRepo.findByToken(token).transact(xa).orDie
-      inv <- ZIO.fromOption(invOpt).orElseFail("Invalid or expired invitation token")
-      _ <- ZIO.fail("This invitation was already used").when(inv.status != InvitationStatus.Pending)
-      _ <- ZIO.fail("Invitation has expired").when(inv.expiresAt.isBefore(Instant.now()))
-      _ <- ZIO.fail("This invitation was sent to another user").when(inv.invitedUserId != userId)
-      leagueOpt <- leagueRepo.findById(inv.leagueId).transact(xa).orDie
-      league <- ZIO.fromOption(leagueOpt).orElseFail("League not found")
-      _ <- ZIO.fail("League is no longer in Setup").when(league.seasonPhase != SeasonPhase.Setup)
-      count <- teamRepo.countByLeague(inv.leagueId).transact(xa).orDie
-      _ <- ZIO.fail("League has no free slots").when(count >= league.teamCount)
       teamId <- IdGen.genTeamId
-      team = Team(
-        id = teamId,
-        leagueId = inv.leagueId,
-        name = teamName,
-        ownerType = TeamOwnerType.Human,
-        ownerUserId = Some(userId),
-        ownerBotId = None,
-        budget = BigDecimal(1000000),
-        defaultGamePlanId = None,
-        createdAt = Instant.now(),
-        managerName = None
-      )
-      _ <- teamRepo.create(team).transact(xa).orDie
-      updatedInv = inv.copy(status = InvitationStatus.Accepted)
-      _ <- invitationRepo.update(updatedInv).transact(xa).orDie
-      leagueDto = toLeagueDto(league)
-      teamDto = toTeamDto(team)
-    } yield (leagueDto, teamDto)
+      result <- (for {
+        invOpt    <- invitationRepo.findByToken(token)
+        inv       <- require(invOpt, "Invalid or expired invitation token")
+        _         <- guard(inv.status != InvitationStatus.Pending, "This invitation was already used")
+        _         <- guard(inv.expiresAt.isBefore(Instant.now()), "Invitation has expired")
+        _         <- guard(inv.invitedUserId != userId, "This invitation was sent to another user")
+        leagueOpt <- leagueRepo.findById(inv.leagueId)
+        league    <- require(leagueOpt, "League not found")
+        _         <- guard(league.seasonPhase != SeasonPhase.Setup, "League is no longer in Setup")
+        count     <- teamRepo.countByLeague(inv.leagueId)
+        _         <- guard(count >= league.teamCount, "League has no free slots")
+        team = Team(
+          id = teamId, leagueId = inv.leagueId, name = teamName,
+          ownerType = TeamOwnerType.Human, ownerUserId = Some(userId), ownerBotId = None,
+          budget = BigDecimal(1000000), defaultGamePlanId = None,
+          createdAt = Instant.now(), managerName = None
+        )
+        _         <- teamRepo.create(team)
+        _         <- invitationRepo.update(inv.copy(status = InvitationStatus.Accepted))
+      } yield (toLeagueDto(league), toTeamDto(team))).transact(xa).mapError(e => Option(e.getMessage).getOrElse("Accept invitation failed"))
+    } yield result
+  }
 
   def startSeason(leagueId: LeagueId, userId: UserId, startDateOpt: Option[String]): ZIO[Any, String, LeagueDto] =
     (for {
@@ -317,31 +529,38 @@ case class LeagueServiceLive(
         case None => ZIO.succeed(nextWedOrSat(LocalDate.now(league.timezone)))
       }
       rng = new Random(league.id.value.hashCode)
-      _ <- ZIO.foreachDiscard(teams) { team =>
-        val squad = PlayerGenerator.generateSquad(team.id, rng)
-        ZIO.foreachDiscard(squad)(p => playerRepo.create(p).transact(xa).orDie)
-      }
+      allSquads = teams.flatMap(team => PlayerGenerator.generateSquad(team.id, rng))
       numReferees = league.teamCount / 2
       refereeIds <- ZIO.foreach(List.fill(numReferees)(()))(_ => IdGen.genRefereeId)
       referees = refereeIds.zipWithIndex.map { case (refId, i) =>
         Referee(refId, leagueId, s"Referee ${i + 1}", 0.3 + rng.nextDouble() * 0.5)
       }
-      _ <- ZIO.foreachDiscard(referees)(r => refereeRepo.create(r).transact(xa).orDie)
       teamIds = teams.map(_.id)
       matches = FixtureGenerator.generate(leagueId, teamIds, referees, startDate, league.timezone, rng)
-      _ <- ZIO.foreachDiscard(matches)(m => matchRepo.create(m).transact(xa).orDie)
       transferWindowIds <- ZIO.foreach((2 to (league.totalMatchdays - 2) by 2).toList)(_ => IdGen.genTransferWindowId)
-      _ <- ZIO.foreachDiscard(transferWindowIds.zip((2 to (league.totalMatchdays - 2) by 2).toList)) { case (twId, k) =>
-        val tw = TransferWindow(twId, leagueId, k, k + 2, TransferWindowStatus.Closed)
-        transferWindowRepo.create(tw).transact(xa).orDie
+      transferWindows = transferWindowIds.zip((2 to (league.totalMatchdays - 2) by 2).toList).map { case (twId, k) =>
+        TransferWindow(twId, leagueId, k, k + 2, TransferWindowStatus.Closed)
       }
-      allPlayers <- ZIO.foreach(teams)(t => playerRepo.listByTeam(t.id).transact(xa).orDie).map(_.flatten)
-      positionStats = LeagueContextComputer.computePositionStats(allPlayers)
+      positionStats = LeagueContextComputer.computePositionStats(allSquads)
       leagueContextId <- IdGen.genLeagueContextId
       ctx = LeagueContext(leagueContextId, leagueId, positionStats, Instant.now())
-      _ <- leagueContextRepo.create(ctx).transact(xa).orDie
       updatedLeague = league.copy(startDate = Some(startDate), seasonPhase = SeasonPhase.InProgress)
-      _ <- leagueRepo.update(updatedLeague).transact(xa).orDie
+      _ <- {
+        import cats.implicits.*
+        (for {
+          _ <- allSquads.traverse_(p => playerRepo.create(p))
+          _ <- teams.traverse_ { t =>
+            val squad = allSquads.filter(_.teamId == t.id)
+            val contracts = PlayerGenerator.generateInitialContracts(squad, t.id, league.totalMatchdays)
+            contracts.traverse_(c => contractRepo.create(c))
+          }
+          _ <- referees.traverse_(r => refereeRepo.create(r))
+          _ <- matches.traverse_(m => matchRepo.create(m))
+          _ <- transferWindows.traverse_(tw => transferWindowRepo.create(tw))
+          _ <- leagueContextRepo.create(ctx)
+          _ <- leagueRepo.update(updatedLeague)
+        } yield ()).transact(xa).orDie
+      }
       _ <- ZIO.logInfo(s"Season started: league=${league.name} startDate=$startDate ${teams.size} teams")
     } yield toLeagueDto(updatedLeague)).tapError(err => ZIO.logWarning(s"Start season failed: $err"))
 
@@ -381,43 +600,57 @@ case class LeagueServiceLive(
         "Trener Kamiński", "Trener Lewandowski", "Trener Zieliński", "Trener Szymański", "Trener Woźniak",
         "Trener Dąbrowski", "Trener Kozłowski", "Trener Jankowski", "Trener Mazur", "Trener Krawczyk"
       )
-      _ <- ZIO.foreachDiscard(0 until count) { i =>
+      botTeams <- ZIO.foreach(0 until count) { i =>
         for {
           teamId <- IdGen.genTeamId
           botId <- IdGen.genBotId
-          seed = (leagueId.value.hashCode.toLong << 32) | (i.toLong & 0xFFFFFFFFL)
-          rnd = new Random(seed)
-          budgetAmount = 500_000 + rnd.nextInt(1_000_001)
-          presetName = botTeamNamePresets((current + i) % botTeamNamePresets.size)
-          managerName = botManagerNamePresets((current + i) % botManagerNamePresets.size)
-          team = Team(
+        } yield {
+          val seed = (leagueId.value.hashCode.toLong << 32) | (i.toLong & 0xFFFFFFFFL)
+          val rnd = new Random(seed)
+          val budgetAmount = 500_000 + rnd.nextInt(1_000_001)
+          val baseIdx = (current + i) % botTeamNamePresets.size
+          val suffix = if (current + i >= botTeamNamePresets.size) s" ${(current + i) / botTeamNamePresets.size + 1}" else ""
+          Team(
             id = teamId,
             leagueId = leagueId,
-            name = presetName,
+            name = botTeamNamePresets(baseIdx) + suffix,
             ownerType = TeamOwnerType.Bot,
             ownerUserId = None,
             ownerBotId = Some(botId),
             budget = BigDecimal(budgetAmount),
             defaultGamePlanId = None,
             createdAt = Instant.now(),
-            managerName = Some(managerName)
+            managerName = Some(botManagerNamePresets((current + i) % botManagerNamePresets.size) + suffix)
           )
-          _ <- teamRepo.create(team).transact(xa).orDie
-        } yield ()
+        }
+      }
+      _ <- {
+        import cats.implicits.*
+        import cats.MonadError
+        val me = MonadError[doobie.ConnectionIO, Throwable]
+        (for {
+          recheck <- teamRepo.countByLeague(leagueId)
+          _ <- if (recheck + count > league.teamCount) me.raiseError[Unit](new RuntimeException(s"Race: only ${league.teamCount - recheck} free slot(s)"))
+               else me.pure(())
+          _ <- botTeams.toList.traverse_(t => teamRepo.create(t))
+        } yield ()).transact(xa).mapError(e => Option(e.getMessage).getOrElse("Failed to add bots"))
       }
       _ <- ZIO.logInfo(s"Added $count bot(s) to league=${league.name} (now ${current + count}/${league.teamCount} teams)")
     } yield ()).tapError(err => ZIO.logWarning(s"Add bots failed: $err"))
 
   def playMatchday(leagueId: LeagueId, userId: UserId): ZIO[Any, String, Unit] =
-    (for {
+    withMatchdayLock(leagueId)(for {
       leagueOpt <- leagueRepo.findById(leagueId).transact(xa).orDie
       league <- ZIO.fromOption(leagueOpt).orElseFail("League not found")
       _ <- ZIO.fail("Only league creator can play matchday").when(league.createdByUserId != userId)
-      _ <- ZIO.fail("League must be InProgress").when(league.seasonPhase != SeasonPhase.InProgress)
       nextMd = league.currentMatchday + 1
-      _ <- ZIO.fail("Season finished").when(nextMd > league.totalMatchdays)
+      isPlayOffRound = league.tier.exists(t => t >= 2 && t <= 4) && nextMd >= league.totalMatchdays + 1 && nextMd <= league.totalMatchdays + 2
+      _ <- ZIO.fail("League must be InProgress (or play-off round)").when(
+        league.seasonPhase != SeasonPhase.InProgress && !(league.seasonPhase == SeasonPhase.Finished && isPlayOffRound)
+      )
+      _ <- ZIO.fail("Season finished").when(nextMd > league.totalMatchdays && !isPlayOffRound)
       matches <- matchRepo.listByLeagueAndMatchday(leagueId, nextMd).transact(xa).orDie
-      toPlay = matches.filter(_.status != MatchStatus.Played)
+      toPlay = matches.filter(_.status == MatchStatus.Scheduled)
       _ <- if (toPlay.isEmpty) ZIO.logDebug(s"Play matchday league=${leagueId.value.take(8)}: no matches to play")
            else for {
              _ <- ZIO.logInfo(s"Playing matchday $nextMd/${league.totalMatchdays} league=${league.name} (${toPlay.size} matches)")
@@ -464,7 +697,9 @@ case class LeagueServiceLive(
         pressIntensity = oi.pressIntensity,
         tackle = oi.tackle,
         mark = oi.mark
-      )))
+      ))),
+      p.defenseFormationName,
+      p.defenseCustomPositions.flatMap(parseCustomPositions)
     ), true)
     case _ => (GamePlanInput("4-3-3"), false)
   }
@@ -486,7 +721,9 @@ case class LeagueServiceLive(
     teamInstructions: Option[Map[String, String]] = None,
     playerInstructions: Option[Map[String, Map[String, String]]] = None,
     setPieces: Option[SetPiecesParsed] = None,
-    oppositionInstructions: Option[List[OppositionInstructionParsed]] = None
+    oppositionInstructions: Option[List[OppositionInstructionParsed]] = None,
+    defenseFormationName: Option[String] = None,
+    defenseCustomPositions: Option[List[List[Double]]] = None
   )
   private case class ThrowInConfigParsed(defaultTakerPlayerId: Option[String] = None)
   private case class TriggerConfigParsed(pressZones: Option[List[Int]], counterTriggerZone: Option[Int])
@@ -546,22 +783,23 @@ case class LeagueServiceLive(
     for {
       _ <- traverseConn(resultsWithLogIds) { case (m, result, logId) =>
         val baseSummary = MatchSummaryAggregator.fromEvents(result.events, m.homeTeamId, m.awayTeamId, result.homeGoals, result.awayGoals)
-        val summary = result.analytics.fold(baseSummary)(a => baseSummary.copy(
+        val highlights = MatchHighlights.extract(result.events, m.homeTeamId, m.awayTeamId).map(_.toMap)
+        val summary = result.analytics.fold(baseSummary.copy(highlights = Some(highlights)))(a => baseSummary.copy(
           vaepTotal = Some(a.vaepTotal),
           wpaFinal = Some(a.wpaFinal),
           fieldTilt = a.fieldTilt,
           ppda = a.ppda,
           ballTortuosity = a.ballTortuosity,
           metabolicLoad = Some(a.metabolicLoad),
-          xtByZone = Some((1 to 12).map(z => a.xtValueByZone.getOrElse(z, 0.0)).toList),
-          homeShareByZone = Some((1 to 12).map(z => a.homeShareByZone.getOrElse(z, 0.5)).toList),
+          xtByZone = Some((1 to PitchModel.TotalZones).map(z => a.xtValueByZone.getOrElse(z, 0.0)).toList),
+          homeShareByZone = Some((1 to PitchModel.TotalZones).map(z => a.homeShareByZone.getOrElse(z, 0.5)).toList),
           vaepBreakdownByPlayer = Some(a.vaepByPlayerByEventType.map { case (pid, m) => pid.value -> m }),
           pressingByPlayer = Some(a.defensiveActionsByPlayer.map { case (pid, n) => pid.value -> n }),
           estimatedDistanceByPlayer = Some(a.estimatedDistanceByPlayer.map { case (pid, d) => pid.value -> d }),
           influenceByPlayer = Some(a.playerActivityByZone.map { case (pid, m) => pid.value -> m.map { case (z, c) => z.toString -> c } }),
-          avgDefendersInConeByZone = Some((1 to 12).map(z => a.shotContextByZone.get(z).map(_._1).getOrElse(0.0)).toList),
-          avgGkDistanceByZone = Some((1 to 12).map(z => a.shotContextByZone.get(z).map(_._2).getOrElse(0.0)).toList),
-          setPieceZoneActivity = Some(a.setPieceZoneActivity.view.mapValues(m => (1 to 12).map(z => m.getOrElse(z, 0)).toList).toMap),
+          avgDefendersInConeByZone = Some((1 to PitchModel.TotalZones).map(z => a.shotContextByZone.get(z).map(_._1).getOrElse(0.0)).toList),
+          avgGkDistanceByZone = Some((1 to PitchModel.TotalZones).map(z => a.shotContextByZone.get(z).map(_._2).getOrElse(0.0)).toList),
+          setPieceZoneActivity = Some(a.setPieceZoneActivity.view.mapValues(m => (1 to PitchModel.TotalZones).map(z => m.getOrElse(z, 0)).toList).toMap),
           pressingInOppHalfByPlayer = Some(a.pressingInOppHalfByPlayer.map { case (pid, n) => pid.value -> n }),
           playerTortuosityByPlayer = Some(a.playerTortuosityByPlayer.map { case (pid, d) => pid.value -> d }),
           metabolicLoadByPlayer = Some(a.metabolicLoadByPlayer.map { case (pid, d) => pid.value -> d }),
@@ -570,13 +808,13 @@ case class LeagueServiceLive(
           setPiecePatternH = Some(a.setPiecePatternH.map(hMap => hMap.map { case (k, v) => k.toString -> v }.toMap)),
           setPieceRoutineCluster = Some(a.setPieceRoutineCluster),
           poissonPrognosis = a.poissonPrognosis,
-          voronoiCentroidByZone = Some((1 to 12).map(z => a.voronoiCentroidByZone.getOrElse(z, 0.5)).toList),
+          voronoiCentroidByZone = Some((1 to PitchModel.TotalZones).map(z => a.voronoiCentroidByZone.getOrElse(z, 0.5)).toList),
           passValueByPlayer = Some(a.passValueByPlayer.map { case (pid, d) => pid.value -> d }),
           passValueTotal = Some(a.passValueTotal),
           passValueUnderPressureTotal = Some(a.passValueUnderPressureTotal),
           passValueUnderPressureByPlayer = Some(a.passValueUnderPressureByPlayer.map { case (pid, d) => pid.value -> d }),
           influenceScoreByPlayer = Some(a.influenceScoreByPlayer.map { case (pid, d) => pid.value -> d })
-        ))
+        ).copy(highlights = Some(highlights)))
         val now = Instant.now()
         val log = MatchResultLog(logId, m.id, result.events, Some(summary), now)
         val updatedMatch = m.copy(status = MatchStatus.Played, homeGoals = Some(result.homeGoals), awayGoals = Some(result.awayGoals), resultLogId = Some(logId))
@@ -636,14 +874,26 @@ case class LeagueServiceLive(
       homeLineupIds = homeSquad.lineup.map(_.playerId).toSet
       awayLineupIds = awaySquad.lineup.map(_.playerId).toSet
       _ <- traverseConn(homePlayers) { p =>
-        val newFreshness = if (homeLineupIds.contains(p.id)) (p.freshness - 0.25).max(0.0) else p.freshness
+        val played = homeLineupIds.contains(p.id)
+        val newFreshness = if (played) (p.freshness - 0.25).max(0.0) else p.freshness
         val newMorale = (p.morale + homeDelta).max(0.0).min(1.0)
-        playerRepo.updateFreshnessMorale(p.id, newFreshness, newMorale)
+        val newCondition = if (played) (p.condition - 0.12).max(0.0) else p.condition
+        val newSharpness = if (played) (p.matchSharpness + 0.03).min(1.0) else (p.matchSharpness - 0.01).max(0.0)
+        for {
+          _ <- playerRepo.updateFreshnessMorale(p.id, newFreshness, newMorale)
+          _ <- playerRepo.updateConditionSharpness(p.id, newCondition, newSharpness)
+        } yield ()
       }
       _ <- traverseConn(awayPlayers) { p =>
-        val newFreshness = if (awayLineupIds.contains(p.id)) (p.freshness - 0.25).max(0.0) else p.freshness
+        val played = awayLineupIds.contains(p.id)
+        val newFreshness = if (played) (p.freshness - 0.25).max(0.0) else p.freshness
         val newMorale = (p.morale + awayDelta).max(0.0).min(1.0)
-        playerRepo.updateFreshnessMorale(p.id, newFreshness, newMorale)
+        val newCondition = if (played) (p.condition - 0.12).max(0.0) else p.condition
+        val newSharpness = if (played) (p.matchSharpness + 0.03).min(1.0) else (p.matchSharpness - 0.01).max(0.0)
+        for {
+          _ <- playerRepo.updateFreshnessMorale(p.id, newFreshness, newMorale)
+          _ <- playerRepo.updateConditionSharpness(p.id, newCondition, newSharpness)
+        } yield ()
       }
       _ <- traverseConn(log.events.filter(_.eventType == "Injury").toList) { e =>
         e.actorPlayerId.fold(connUnit) { pid =>
@@ -674,9 +924,11 @@ case class LeagueServiceLive(
           _ <- traverseConn(players) { p =>
             val baseRegen = 0.15
             val newFreshness = (p.freshness + baseRegen + regenBonus).min(1.0).max(0.0)
+            val newCondition = (p.condition + 0.18).min(1.0).max(0.0)
             val clearInjury = p.injury.exists(_.returnAtMatchday <= currentMatchday)
             for {
               _ <- playerRepo.updateFreshnessMorale(p.id, newFreshness, p.morale)
+              _ <- playerRepo.updateConditionSharpness(p.id, newCondition, p.matchSharpness)
               _ <- if (clearInjury) playerRepo.updateInjury(p.id, None) else connUnit
               _ <- {
                 // MVP: minimalny rozwój atrybutów od treningu (rzadko, małe +1, cap 20)
@@ -732,10 +984,10 @@ case class LeagueServiceLive(
       _ <- ZIO.foreachDiscard(openWindows) { w =>
         val windowOffers = allOffers.filter(_.windowId == w.id)
         val botIds = botTeams.map(_.id).toSet
-        val alreadyHasBotOffers = windowOffers.exists(o => botIds.contains(o.fromTeamId))
-        if (alreadyHasBotOffers) ZIO.unit
-        else
-          ZIO.foreachDiscard(humanTeams) { humanTeam =>
+        ZIO.foreachDiscard(humanTeams) { humanTeam =>
+          val alreadyHasBotOffersForTeam = windowOffers.exists(o => botIds.contains(o.fromTeamId) && o.toTeamId == humanTeam.id)
+          if (alreadyHasBotOffersForTeam) ZIO.unit
+          else {
             for {
               players <- playerRepo.listByTeam(humanTeam.id).transact(xa).orDie
               _ <- if (players.size < 16) ZIO.unit
@@ -779,6 +1031,7 @@ case class LeagueServiceLive(
                    } yield ()
             } yield ()
           }
+        }
       }
     } yield ()
 
@@ -849,7 +1102,9 @@ case class LeagueServiceLive(
       idToPlayer = all.map(p => p.id -> p).toMap
       ordered = squad.lineup.flatMap(s => idToPlayer.get(s.playerId).map(p => (p, s.positionSlot)))
       _ <- ZIO.fail(s"Missing players for squad").when(ordered.size != 11)
-      players = ordered.map { case (p, slot) => PlayerMatchInput(p, p.freshness, p.morale, recentMinutes.get(p.id)) }
+      lineupIds = ordered.map(_._1.id).toSet
+      bench = all.filter(p => !lineupIds.contains(p.id)).take(7).map(p => PlayerMatchInput(p, p.freshness, p.morale, recentMinutes.get(p.id)))
+      players = ordered.map { case (p, slot) => PlayerMatchInput(p, p.freshness, p.morale, recentMinutes.get(p.id)) } ++ bench
       lineupMap = ordered.map { case (p, slot) => p.id -> slot }.toMap
     } yield MatchTeamInput(teamId, players, lineupMap)
 
@@ -895,10 +1150,10 @@ case class LeagueServiceLive(
       if (total == 0) 0.5 else home.toDouble / total
     }
     val defensiveTypes = Set("Tackle", "PassIntercepted")
-    val pressHome = (1 to 12).map { z =>
+    val pressHome = (1 to PitchModel.TotalZones).map { z =>
       events.count(e => e.zone.contains(z) && defensiveTypes.contains(e.eventType) && e.teamId.exists(_.value == homeTeamId))
     }.toList
-    val pressAway = (1 to 12).map { z =>
+    val pressAway = (1 to PitchModel.TotalZones).map { z =>
       events.count(e => e.zone.contains(z) && defensiveTypes.contains(e.eventType) && e.teamId.exists(_.value == awayTeamId))
     }.toList
     (possessionBySegment, pressHome, pressAway)
@@ -944,24 +1199,162 @@ case class LeagueServiceLive(
   def getMatchSquadsForUser(matchId: MatchId, userId: UserId): ZIO[Any, String, List[MatchSquadDto]] =
     getMatch(matchId).flatMap(m => ensureUserHasAccessToLeague(userId, LeagueId(m.leagueId)) *> getMatchSquads(matchId))
 
-  private val formationTips: Map[String, String] = Map(
-    "4-4-2" -> "Rywal gra 4-4-2; rozważ pressing w strefach 7–8 i szybkie przejście w kontrę.",
-    "4-3-3" -> "Rywal gra 4-3-3; utrzymaj dyscyplinę w środku pola (strefy 5–8).",
-    "3-5-2" -> "Rywal gra 3-5-2; wykorzystaj skrzydła (strefy 2, 5, 8, 11) i pressing w środku.",
-    "4-2-3-1" -> "Rywal gra 4-2-3-1; odetnij podania do rozgrywającego (strefy 6–7).",
-    "Własna" -> "Rywal z własnym ustawieniem; dostosuj pressing do słabych stref (środek lub skrzydła)."
+  private val formationTacticalNotes: Map[String, (List[String], List[String], List[String])] = Map(
+    "4-4-2" -> (
+      List("Solidna obrona z dwoma blisko siebie stoperami", "Dobre pokrycie skrzydeł", "Prosta struktura defensywna"),
+      List("Brak dodatkowego gracza w środku pola", "Wolne strefy między liniami", "Skrzydłowi muszą pokrywać dużo terenu"),
+      List("Graj z trójką pomocników, aby uzyskać przewagę w środku", "Wykorzystaj strefy 14–15 (między liniami)", "Szybkie kombinacje przez środek")
+    ),
+    "4-3-3" -> (
+      List("Silny pressing wysoki z trzema napastnikami", "Dominacja w posiadaniu piłki", "Elastyczne skrzydła"),
+      List("Odsłonięte skrzydła obrony przy pressingu", "Przestrzenie za linią obrony", "Kontrataki przez boki"),
+      List("Graj niskim blokiem i kontratakuj", "Celuj w strefy 2, 5 (boczne, za wahadłowymi)", "Długie podania za linię obrony")
+    ),
+    "3-5-2" -> (
+      List("Przewaga numeryczna w środku pola", "Silne wahadłowe pokrycie boków", "Dobra budowa z trzech z tyłu"),
+      List("Odsłonięte boki przy wahadłowych wysoko", "Trójka obrońców wrażliwa na szybkich skrzydłowych", "Brak szerokości w ataku"),
+      List("Wykorzystaj skrzydła (strefy 4, 10, 16, 22)", "Szybkie zmiany strony gry", "Crossing z boków do pola karnego")
+    ),
+    "4-2-3-1" -> (
+      List("Kontrola środka pola przez dwóch defensywnych", "Kreatywny rozgrywający za napastnikiem", "Solidna defensywa"),
+      List("Wolne strefy między '6' a '10'", "Skrzydłowi muszą wracać do obrony", "Jeden napastnik łatwy do zneutralizowania"),
+      List("Pressing na rozgrywającego (strefa 14–15)", "Odetnij podania do '10'", "Graj bezpośrednio, omijając środek pola")
+    ),
+    "3-4-3" -> (
+      List("Bardzo ofensywne ustawienie", "Szeroki atak z trzema napastnikami", "Dominacja na bokach"),
+      List("Bardzo odsłonięta obrona", "Trójka stoperów wrażliwa na kontry", "Duże przestrzenie za wahadłowymi"),
+      List("Kontrataki przez środek za linię obrony", "Celuj w przestrzenie między stoperami", "Defensywne ustawienie i cierpliwa gra")
+    ),
+    "5-3-2" -> (
+      List("Bardzo solidna defensywa z pięcioma z tyłu", "Trudna do przełamania", "Dobra na kontrataki"),
+      List("Mało kreatywności w ataku", "Brak szerokości", "Wolna budowa akcji"),
+      List("Cierpliwa rozgrywka z dużą ilością podań", "Wymuszaj błędy wysokim pressingiem", "Crossing z daleka")
+    ),
+    "4-1-4-1" -> (
+      List("Solidna defensywa z dodatkowym '6'", "Dobre pokrycie strefy środkowej", "Kontrola tempa gry"),
+      List("Izolowany napastnik", "Wolna budowa z tyłu", "Brak wsparcia dla napastnika"),
+      List("Pressing wysoki na samotnego '6'", "Szybkie podwójne podania za linię", "Celuj w przestrzenie za bocznym pomocnikami")
+    ),
+    "4-5-1" -> (
+      List("Bardzo defensywna formacja", "Pięciu pomocników kontroluje środek", "Trudna do przełamania"),
+      List("Jeden napastnik - łatwy do ubezpieczenia", "Mało opcji ofensywnych", "Zależność od kontrataków"),
+      List("Wymuszaj błędy pressingiem", "Crossing z boków", "Zmiana stron gry wymusza przesunięcia")
+    ),
+    "4-4-1-1" -> (
+      List("Dodatkowy gracz między liniami", "Elastyczne przejście obrona-atak", "Solidna obrona"),
+      List("Wolne strefy na bokach", "Napastnik izolowany", "Brak szerokości"),
+      List("Graj szeroko, rozciągaj obronę", "Celuj w strefy 4, 10 (boki)", "Presuj gracza 'za napastnikiem'")
+    ),
+    "3-4-1-2" -> (
+      List("Silny środek pola", "Kreatywny rozgrywający", "Dwa napastnikii w polu karnym"),
+      List("Odsłonięte boki", "Trzy z tyłu wrażliwe na crossing", "Wahadłowi muszą wracać daleko"),
+      List("Wykorzystaj boki (strefy 4, 10, 16, 22)", "Dośrodkowania z głębi", "Presuj wahadłowych wysoko")
+    )
   )
-  private val defaultTip = "Przygotuj się taktycznie; dostosuj pressing i kontrataki do stylu rywala."
+
+  private def analyzeOpponentPlayers(players: List[Player]): (List[String], List[String], List[String]) = {
+    if (players.isEmpty) return (Nil, Nil, Nil)
+
+    val outfield = players.filter(_.preferredPositions != Set("GK"))
+    val gks = players.filter(_.preferredPositions == Set("GK"))
+    val avgPace = outfield.flatMap(_.physical.get("pace")).sum.toDouble / math.max(1, outfield.size)
+    val avgStamina = outfield.flatMap(_.physical.get("stamina")).sum.toDouble / math.max(1, outfield.size)
+    val avgPassing = outfield.flatMap(_.technical.get("passing")).sum.toDouble / math.max(1, outfield.size)
+    val avgShooting = outfield.flatMap(_.technical.get("shooting")).sum.toDouble / math.max(1, outfield.size)
+    val avgTackling = outfield.flatMap(_.technical.get("tackling")).sum.toDouble / math.max(1, outfield.size)
+    val avgComposure = outfield.flatMap(_.mental.get("composure")).sum.toDouble / math.max(1, outfield.size)
+    val gkOverall = gks.headOption.map(PlayerOverall.overall).getOrElse(10.0)
+
+    val strengths = scala.collection.mutable.ListBuffer[String]()
+    val weaknesses = scala.collection.mutable.ListBuffer[String]()
+
+    if (avgPace >= 14) strengths += s"Szybki zespół (śr. szybkość ${f"$avgPace%.1f"})"
+    else if (avgPace <= 10) weaknesses += s"Wolny zespół (śr. szybkość ${f"$avgPace%.1f"})"
+
+    if (avgPassing >= 14) strengths += s"Dobra gra podaniami (śr. podania ${f"$avgPassing%.1f"})"
+    else if (avgPassing <= 10) weaknesses += s"Słaba gra podaniami (śr. podania ${f"$avgPassing%.1f"})"
+
+    if (avgShooting >= 14) strengths += s"Silni w wykończeniu (śr. strzały ${f"$avgShooting%.1f"})"
+    else if (avgShooting <= 10) weaknesses += s"Słabi w wykończeniu (śr. strzały ${f"$avgShooting%.1f"})"
+
+    if (avgTackling >= 14) strengths += s"Agresywna defensywa (śr. odbiór ${f"$avgTackling%.1f"})"
+    else if (avgTackling <= 10) weaknesses += s"Słaba defensywa (śr. odbiór ${f"$avgTackling%.1f"})"
+
+    if (avgStamina <= 10) weaknesses += s"Niska wytrzymałość (śr. ${f"$avgStamina%.1f"}) — późne minuty to szansa"
+    if (avgComposure <= 10) weaknesses += "Niska opanowanie — presja może wymusić błędy"
+    if (gkOverall <= 10) weaknesses += s"Słaby bramkarz (overall ${f"$gkOverall%.1f"}) — strzały z dystansu mogą być skuteczne"
+    else if (gkOverall >= 15) strengths += s"Silny bramkarz (overall ${f"$gkOverall%.1f"})"
+
+    val keyPlayers = outfield
+      .map(p => (p, PlayerOverall.overall(p)))
+      .sortBy(-_._2)
+      .take(3)
+      .map { case (p, ov) => s"${p.firstName} ${p.lastName} (${p.preferredPositions.mkString("/")} — overall ${f"$ov%.1f"})" }
+
+    (strengths.toList, weaknesses.toList, keyPlayers)
+  }
+
+  private def suggestFormationsAgainst(formation: String, oppWeaknesses: List[String]): List[String] = {
+    val base = formation match {
+      case f if f.contains("4-4-2") => List("4-3-3", "4-2-3-1")
+      case f if f.contains("4-3-3") => List("4-4-2", "4-5-1", "5-3-2")
+      case f if f.contains("3-5-2") => List("4-3-3", "4-2-3-1")
+      case f if f.contains("4-2-3-1") => List("4-3-3", "3-5-2")
+      case f if f.contains("3-4-3") => List("5-3-2", "4-4-2", "4-5-1")
+      case f if f.contains("5-3-2") => List("4-3-3", "3-4-3")
+      case f if f.contains("4-1-4-1") => List("4-3-3", "3-4-3")
+      case f if f.contains("4-5-1") => List("4-3-3", "3-4-3")
+      case f if f.contains("4-4-1-1") => List("4-3-3", "3-5-2")
+      case f if f.contains("3-4-1-2") => List("4-3-3", "4-4-2")
+      case _ => List("4-3-3", "4-4-2")
+    }
+    val hasWeakDefense = oppWeaknesses.exists(w => w.contains("defensyw") || w.contains("odbiór"))
+    if (hasWeakDefense) (base :+ "3-4-3").distinct.take(3) else base.take(3)
+  }
 
   def getAssistantTipForUser(matchId: MatchId, teamId: TeamId, userId: UserId): ZIO[Any, String, AssistantTipDto] =
     for {
       m <- getMatch(matchId)
       _ <- ensureUserHasAccessToLeague(userId, LeagueId(m.leagueId))
       squads <- matchSquadRepo.listByMatch(matchId).transact(xa).orDie
+      opponentTeamId = if (TeamId(m.homeTeamId) == teamId) TeamId(m.awayTeamId) else TeamId(m.homeTeamId)
       opponentSquad = squads.find(_.teamId != teamId)
       formation = opponentSquad.flatMap { s => val (plan, _) = parseGamePlan(s.gamePlanJson); Some(plan.formationName) }.getOrElse("4-3-3")
-      tip = formationTips.get(formation).getOrElse(defaultTip)
-    } yield AssistantTipDto(tip)
+      allOpponentPlayers <- playerRepo.listByTeam(opponentTeamId).transact(xa).orDie
+      startingXiIds = opponentSquad.map(_.lineup.map(_.playerId).toSet).getOrElse(Set.empty[PlayerId])
+      opponentPlayers = if (startingXiIds.nonEmpty) allOpponentPlayers.filter(p => startingXiIds.contains(p.id)) else allOpponentPlayers
+      (playerStrengths, playerWeaknesses, keyPlayers) = analyzeOpponentPlayers(opponentPlayers)
+      (formStrengths, formWeaknesses, formTactics) = formationTacticalNotes.getOrElse(formation,
+        (List("Niestandardowe ustawienie"), List("Nieprzewidywalna struktura"), List("Dostosuj pressing do obserwacji")))
+      allStrengths = formStrengths ++ playerStrengths
+      allWeaknesses = formWeaknesses ++ playerWeaknesses
+      suggestedFormations = suggestFormationsAgainst(formation, allWeaknesses)
+      tipLines = List(
+        s"--- ANALIZA RYWALA: formacja $formation ---",
+        "",
+        "MOCNE STRONY RYWALA:",
+        allStrengths.zipWithIndex.map { case (s, i) => s"  ${i + 1}. $s" }.mkString("\n"),
+        "",
+        "SŁABE STRONY RYWALA:",
+        allWeaknesses.zipWithIndex.map { case (w, i) => s"  ${i + 1}. $w" }.mkString("\n"),
+        "",
+        "SUGESTIE TAKTYCZNE:",
+        formTactics.zipWithIndex.map { case (t, i) => s"  ${i + 1}. $t" }.mkString("\n"),
+        "",
+        s"SUGEROWANE FORMACJE: ${suggestedFormations.mkString(", ")}",
+        "",
+        s"KLUCZOWI GRACZE DO OBSERWACJI: ${keyPlayers.mkString("; ")}"
+      )
+      tip = tipLines.mkString("\n")
+    } yield AssistantTipDto(
+      tip = tip,
+      opponentFormation = Some(formation),
+      opponentStrengths = Some(allStrengths),
+      opponentWeaknesses = Some(allWeaknesses),
+      tacticalSuggestions = Some(formTactics),
+      keyPlayersToWatch = Some(keyPlayers),
+      suggestedFormations = Some(suggestedFormations)
+    )
 
   def getTeam(teamId: TeamId): ZIO[Any, String, TeamDto] =
     teamRepo.findById(teamId).transact(xa).orDie.flatMap {
@@ -972,11 +1365,13 @@ case class LeagueServiceLive(
   def getTeamForUser(teamId: TeamId, userId: UserId): ZIO[Any, String, TeamDto] =
     getTeam(teamId).flatMap(dto => ensureUserHasAccessToLeague(userId, LeagueId(dto.leagueId)).as(dto))
 
-  def getTeamPlayers(teamId: TeamId): ZIO[Any, String, List[PlayerDto]] =
-    for {
-      _ <- getTeam(teamId)
-      players <- playerRepo.listByTeam(teamId).transact(xa).orDie
-    } yield players.map(p => PlayerDto(
+  private def toPlayerDto(p: Player): PlayerDto = {
+    val ov = PlayerOverall.overall(p)
+    val phys = PlayerOverall.physicalAvg(p)
+    val tech = PlayerOverall.technicalAvg(p)
+    val ment = PlayerOverall.mentalAvg(p)
+    val def_ = PlayerOverall.defenseAvg(p)
+    PlayerDto(
       p.id.value,
       p.teamId.value,
       p.firstName,
@@ -988,11 +1383,42 @@ case class LeagueServiceLive(
       physical = p.physical,
       technical = p.technical,
       mental = p.mental,
-      traits = p.traits
-    ))
+      traits = p.traits,
+      overall = BigDecimal(ov).setScale(2, BigDecimal.RoundingMode.HALF_UP).toDouble,
+      physicalAvg = BigDecimal(phys).setScale(2, BigDecimal.RoundingMode.HALF_UP).toDouble,
+      technicalAvg = BigDecimal(tech).setScale(2, BigDecimal.RoundingMode.HALF_UP).toDouble,
+      mentalAvg = BigDecimal(ment).setScale(2, BigDecimal.RoundingMode.HALF_UP).toDouble,
+      defenseAvg = BigDecimal(def_).setScale(2, BigDecimal.RoundingMode.HALF_UP).toDouble,
+      condition = p.condition.max(0).min(1),
+      matchSharpness = p.matchSharpness.max(0).min(1)
+    )
+  }
+
+  def getTeamPlayers(teamId: TeamId): ZIO[Any, String, List[PlayerDto]] =
+    for {
+      _ <- getTeam(teamId)
+      players <- playerRepo.listByTeam(teamId).transact(xa).orDie
+    } yield players.map(toPlayerDto)
 
   def getTeamPlayersForUser(teamId: TeamId, userId: UserId): ZIO[Any, String, List[PlayerDto]] =
     getTeamForUser(teamId, userId) *> getTeamPlayers(teamId)
+
+  def getTeamContractsForUser(teamId: TeamId, userId: UserId): ZIO[Any, String, List[ContractDto]] =
+    getTeamForUser(teamId, userId) *>
+      (for {
+        contracts <- contractRepo.listByTeam(teamId).transact(xa).orDie
+        dtos <- ZIO.foreach(contracts) { c =>
+          playerRepo.findById(c.playerId).transact(xa).orDie.map {
+            case Some(p) => ContractDto(
+              c.id.value, c.playerId.value, c.teamId.value,
+              s"${p.firstName} ${p.lastName}",
+              c.weeklySalary.toDouble, c.startMatchday, c.endMatchday,
+              c.releaseClause.map(_.toDouble)
+            )
+            case None => ContractDto(c.id.value, c.playerId.value, c.teamId.value, "?", c.weeklySalary.toDouble, c.startMatchday, c.endMatchday, c.releaseClause.map(_.toDouble))
+          }
+        }
+      } yield dtos)
 
   def getTeamGamePlans(teamId: TeamId): ZIO[Any, String, List[GamePlanSnapshotDto]] =
     for {
@@ -1034,13 +1460,12 @@ case class LeagueServiceLive(
       teams <- teamRepo.listByLeague(leagueId).transact(xa).orDie
       teamNames = teams.map(t => t.id -> t.name).toMap
       playerIds = filtered.map(_.playerId).distinct
-      playerOpts <- ZIO.foreach(playerIds)(id => playerRepo.findById(id).transact(xa).orDie)
-      playerNames = playerIds.zip(playerOpts).flatMap { case (id, opt) =>
-        opt.map(p => id -> s"${p.firstName} ${p.lastName}").toList
-      }.toMap
+      allPlayers <- playerRepo.listByTeamIds(teams.map(_.id)).transact(xa).orDie
+      playerNames = allPlayers.collect { case p if playerIds.contains(p.id) => p.id -> s"${p.firstName} ${p.lastName}" }.toMap
     } yield filtered.map(o => TransferOfferDto(
       o.id.value, o.windowId.value, o.fromTeamId.value, o.toTeamId.value, o.playerId.value,
       o.amount.toDouble, o.status.toString, o.createdAt.toEpochMilli, o.respondedAt.map(_.toEpochMilli),
+      counterAmount = o.counterAmount.map(_.toDouble),
       fromTeamName = teamNames.get(o.fromTeamId),
       toTeamName = teamNames.get(o.toTeamId),
       playerName = playerNames.get(o.playerId)
@@ -1057,6 +1482,7 @@ case class LeagueServiceLive(
       windowId = TransferWindowId(req.windowId)
       windows <- transferWindowRepo.listByLeague(leagueId).transact(xa).orDie
       _ <- ZIO.fail("Transfer window not found or not in this league").when(!windows.exists(_.id == windowId))
+      _ <- ZIO.fail("Transfer window is not open").when(!windows.exists(w => w.id == windowId && w.status == TransferWindowStatus.Open))
       toTeamId = TeamId(req.toTeamId)
       _ <- ZIO.fail("Cannot make offer to own team").when(toTeamId == fromTeam.id)
       _ <- ZIO.fail("To team must be in same league").when(!teams.exists(_.id == toTeamId))
@@ -1091,51 +1517,103 @@ case class LeagueServiceLive(
           requiredPrice = if (isKey) estimatedPlayerPrice(player) * premium else estimatedPlayerPrice(player)
           ok = req.amount >= requiredPrice
           _ <- if (ok) {
-            for {
-              _ <- playerRepo.updateTeamId(offer.playerId, offer.fromTeamId).transact(xa).orDie
-              _ <- teamRepo.update(fromTeam.copy(budget = fromTeam.budget - offer.amount)).transact(xa).orDie
-              _ <- teamRepo.update(toTeam.copy(budget = toTeam.budget + offer.amount)).transact(xa).orDie
-              _ <- transferOfferRepo.update(offer.copy(status = TransferOfferStatus.Accepted, respondedAt = Some(now))).transact(xa).orDie
-            } yield ()
+            (for {
+              _ <- playerRepo.updateTeamId(offer.playerId, offer.fromTeamId)
+              _ <- teamRepo.update(fromTeam.copy(budget = fromTeam.budget - offer.amount))
+              _ <- teamRepo.update(toTeam.copy(budget = toTeam.budget + offer.amount))
+              _ <- transferOfferRepo.update(offer.copy(status = TransferOfferStatus.Accepted, respondedAt = Some(now)))
+            } yield ()).transact(xa).orDie
           } else ZIO.unit
         } yield ok
       } else ZIO.succeed(false)
-    } yield TransferOfferDto(offer.id.value, offer.windowId.value, offer.fromTeamId.value, offer.toTeamId.value, offer.playerId.value, offer.amount.toDouble, if (accepted) TransferOfferStatus.Accepted.toString else offer.status.toString, offer.createdAt.toEpochMilli, if (accepted) Some(now.toEpochMilli) else None, fromTeamName = Some(fromTeam.name), toTeamName = Some(toTeam.name), playerName = Some(s"${player.firstName} ${player.lastName}"))
+    } yield TransferOfferDto(offer.id.value, offer.windowId.value, offer.fromTeamId.value, offer.toTeamId.value, offer.playerId.value, offer.amount.toDouble, if (accepted) TransferOfferStatus.Accepted.toString else offer.status.toString, offer.createdAt.toEpochMilli, if (accepted) Some(now.toEpochMilli) else None, counterAmount = offer.counterAmount.map(_.toDouble), fromTeamName = Some(fromTeam.name), toTeamName = Some(toTeam.name), playerName = Some(s"${player.firstName} ${player.lastName}"))
 
-  def acceptTransferOffer(offerId: TransferOfferId, userId: UserId): ZIO[Any, String, Unit] =
-    for {
-      opt <- transferOfferRepo.findById(offerId).transact(xa).orDie
-      offer <- ZIO.fromOption(opt).orElseFail("Offer not found")
-      _ <- ZIO.fail("Offer already responded").when(offer.status != TransferOfferStatus.Pending)
-      fromTeamOpt <- teamRepo.findById(offer.fromTeamId).transact(xa).orDie
-      fromTeam <- ZIO.fromOption(fromTeamOpt).orElseFail("From team not found")
-      toTeamOpt <- teamRepo.findById(offer.toTeamId).transact(xa).orDie
-      toTeam <- ZIO.fromOption(toTeamOpt).orElseFail("To team not found")
-      _ <- ZIO.fail("Only the selling team owner can accept").when(!toTeam.ownerUserId.contains(userId))
-      fromCount <- playerRepo.countByTeam(offer.fromTeamId).transact(xa).orDie
-      toCount <- playerRepo.countByTeam(offer.toTeamId).transact(xa).orDie
-      _ <- ZIO.fail("Selling would leave fewer than 16 players").when(toCount <= 16)
-      _ <- ZIO.fail("Buyer would exceed 20 players").when(fromCount >= 20)
-      _ <- ZIO.fail("Insufficient budget").when(fromTeam.budget < offer.amount)
-      _ <- playerRepo.updateTeamId(offer.playerId, offer.fromTeamId).transact(xa).orDie
-      _ <- teamRepo.update(fromTeam.copy(budget = fromTeam.budget - offer.amount)).transact(xa).orDie
-      _ <- teamRepo.update(toTeam.copy(budget = toTeam.budget + offer.amount)).transact(xa).orDie
-      now = Instant.now()
-      _ <- transferOfferRepo.update(offer.copy(status = TransferOfferStatus.Accepted, respondedAt = Some(now))).transact(xa).orDie
-      _ <- ZIO.logInfo(s"Transfer accepted: offerId=${offerId.value.take(8)} player=${offer.playerId.value.take(8)} amount=${offer.amount} from=${offer.fromTeamId.value.take(8)} to=${offer.toTeamId.value.take(8)}")
-    } yield ()
+  def acceptTransferOffer(offerId: TransferOfferId, userId: UserId): ZIO[Any, String, Unit] = {
+    val me = MonadError[ConnectionIO, Throwable]
+    def require[A](opt: Option[A], msg: String): ConnectionIO[A] =
+      opt.fold(me.raiseError[A](new RuntimeException(msg)))(me.pure(_))
+    def guard(cond: Boolean, msg: String): ConnectionIO[Unit] =
+      if (cond) me.raiseError(new RuntimeException(msg)) else me.pure(())
 
-  def rejectTransferOffer(offerId: TransferOfferId, userId: UserId): ZIO[Any, String, Unit] =
-    for {
-      opt <- transferOfferRepo.findById(offerId).transact(xa).orDie
-      offer <- ZIO.fromOption(opt).orElseFail("Offer not found")
-      _ <- ZIO.fail("Offer already responded").when(offer.status != TransferOfferStatus.Pending)
-      toTeamOpt <- teamRepo.findById(offer.toTeamId).transact(xa).orDie
-      toTeam <- ZIO.fromOption(toTeamOpt).orElseFail("To team not found")
-      _ <- ZIO.fail("Only the selling team owner can reject").when(!toTeam.ownerUserId.contains(userId))
-      now = Instant.now()
-      _ <- transferOfferRepo.update(offer.copy(status = TransferOfferStatus.Rejected, respondedAt = Some(now))).transact(xa).orDie
+    val txn = for {
+      opt       <- transferOfferRepo.findById(offerId)
+      offer     <- require(opt, "Offer not found")
+      _         <- guard(offer.status != TransferOfferStatus.Pending, "Offer already responded")
+      fromTOpt  <- teamRepo.findById(offer.fromTeamId)
+      fromTeam  <- require(fromTOpt, "From team not found")
+      toTOpt    <- teamRepo.findById(offer.toTeamId)
+      toTeam    <- require(toTOpt, "To team not found")
+      _         <- guard(!toTeam.ownerUserId.contains(userId), "Only the selling team owner can accept")
+      fromCount <- playerRepo.countByTeam(offer.fromTeamId)
+      toCount   <- playerRepo.countByTeam(offer.toTeamId)
+      _         <- guard(toCount <= 16, "Selling would leave fewer than 16 players")
+      _         <- guard(fromCount >= 20, "Buyer would exceed 20 players")
+      _         <- guard(fromTeam.budget < offer.amount, "Insufficient budget")
+      now        = Instant.now()
+      _         <- playerRepo.updateTeamId(offer.playerId, offer.fromTeamId)
+      _         <- teamRepo.update(fromTeam.copy(budget = fromTeam.budget - offer.amount))
+      _         <- teamRepo.update(toTeam.copy(budget = toTeam.budget + offer.amount))
+      _         <- transferOfferRepo.update(offer.copy(status = TransferOfferStatus.Accepted, respondedAt = Some(now)))
+    } yield offer
+    txn.transact(xa).mapError(e => Option(e.getMessage).getOrElse("Transfer failed")).flatMap { offer =>
+      ZIO.logInfo(s"Transfer accepted: offerId=${offerId.value.take(8)} player=${offer.playerId.value.take(8)} amount=${offer.amount} from=${offer.fromTeamId.value.take(8)} to=${offer.toTeamId.value.take(8)}")
+    }
+  }
+
+  def rejectTransferOffer(offerId: TransferOfferId, userId: UserId): ZIO[Any, String, Unit] = {
+    val me = MonadError[ConnectionIO, Throwable]
+    def require[A](opt: Option[A], msg: String): ConnectionIO[A] =
+      opt.fold(me.raiseError[A](new RuntimeException(msg)))(me.pure(_))
+    def guard(cond: Boolean, msg: String): ConnectionIO[Unit] =
+      if (cond) me.raiseError(new RuntimeException(msg)) else me.pure(())
+
+    val txn = for {
+      opt    <- transferOfferRepo.findById(offerId)
+      offer  <- require(opt, "Offer not found")
+      _      <- guard(offer.status != TransferOfferStatus.Pending, "Offer already responded")
+      toTOpt <- teamRepo.findById(offer.toTeamId)
+      toTeam <- require(toTOpt, "To team not found")
+      _      <- guard(!toTeam.ownerUserId.contains(userId), "Only the selling team owner can reject")
+      now     = Instant.now()
+      _      <- transferOfferRepo.update(offer.copy(status = TransferOfferStatus.Rejected, respondedAt = Some(now)))
     } yield ()
+    txn.transact(xa).mapError(e => Option(e.getMessage).getOrElse("Reject failed"))
+  }
+
+  def counterTransferOffer(offerId: TransferOfferId, userId: UserId, counterAmount: BigDecimal): ZIO[Any, String, TransferOfferDto] = {
+    val me = MonadError[ConnectionIO, Throwable]
+    def require[A](opt: Option[A], msg: String): ConnectionIO[A] =
+      opt.fold(me.raiseError[A](new RuntimeException(msg)))(me.pure(_))
+    def guard(cond: Boolean, msg: String): ConnectionIO[Unit] =
+      if (cond) me.raiseError(new RuntimeException(msg)) else me.pure(())
+
+    ZIO.fail("Counter amount must be positive").when(counterAmount <= 0) *> {
+      val txn = for {
+        opt      <- transferOfferRepo.findById(offerId)
+        offer    <- require(opt, "Offer not found")
+        _        <- guard(offer.status != TransferOfferStatus.Pending, "Offer already responded")
+        toTOpt   <- teamRepo.findById(offer.toTeamId)
+        toTeam   <- require(toTOpt, "To team not found")
+        _        <- guard(!toTeam.ownerUserId.contains(userId), "Only the selling team owner can counter")
+        fromTOpt <- teamRepo.findById(offer.fromTeamId)
+        fromTeam <- require(fromTOpt, "From team not found")
+        pOpt     <- playerRepo.findById(offer.playerId)
+        player   <- require(pOpt, "Player not found")
+        updated   = offer.copy(status = TransferOfferStatus.Countered, counterAmount = Some(counterAmount))
+        _        <- transferOfferRepo.update(updated)
+      } yield (updated, fromTeam, toTeam, player)
+      txn.transact(xa).mapError(e => Option(e.getMessage).getOrElse("Counter failed")).map { case (updated, fromTeam, toTeam, player) =>
+        TransferOfferDto(
+          updated.id.value, updated.windowId.value, updated.fromTeamId.value, updated.toTeamId.value, updated.playerId.value,
+          updated.amount.toDouble, updated.status.toString, updated.createdAt.toEpochMilli, None,
+          counterAmount = Some(counterAmount.toDouble),
+          fromTeamName = Some(fromTeam.name),
+          toTeamName = Some(toTeam.name),
+          playerName = Some(s"${player.firstName} ${player.lastName}")
+        )
+      }
+    }
+  }
 
   def submitMatchSquad(matchId: MatchId, teamId: TeamId, userId: UserId, req: SubmitMatchSquadRequest): ZIO[Any, String, MatchSquadDto] =
     for {
@@ -1182,11 +1660,20 @@ case class LeagueServiceLive(
       firstName = req.firstName.getOrElse(player.firstName)
       lastName = req.lastName.getOrElse(player.lastName)
       _ <- playerRepo.updateName(playerId, firstName, lastName).transact(xa).orDie
-      updated = player.copy(firstName = firstName, lastName = lastName)
-    } yield PlayerDto(updated.id.value, updated.teamId.value, updated.firstName, updated.lastName, updated.preferredPositions.toList, updated.injury.map(i => s"return matchday ${i.returnAtMatchday}"), updated.freshness, updated.morale, physical = updated.physical, technical = updated.technical, mental = updated.mental, traits = updated.traits)
+      preferredPositions = req.preferredPositions.fold(player.preferredPositions)(_.toSet.filter(_.nonEmpty))
+      _ <- playerRepo.updatePreferredPositions(playerId, preferredPositions).transact(xa).orDie.when(preferredPositions != player.preferredPositions)
+      clampAttr = (m: Map[String, Int]) => m.view.mapValues(v => math.max(1, math.min(20, v))).toMap
+      physical = req.physical.fold(player.physical)(clampAttr)
+      technical = req.technical.fold(player.technical)(clampAttr)
+      mental = req.mental.fold(player.mental)(clampAttr)
+      _ <- playerRepo.updateAttributes(playerId, physical, technical, mental).transact(xa).orDie.when(req.physical.isDefined || req.technical.isDefined || req.mental.isDefined)
+      updated = player.copy(firstName = firstName, lastName = lastName, preferredPositions = preferredPositions, physical = physical, technical = technical, mental = mental)
+    } yield toPlayerDto(updated)
 
   def saveGamePlan(teamId: TeamId, userId: UserId, name: String, gamePlanJson: String): ZIO[Any, String, GamePlanSnapshotDto] =
     for {
+      _ <- ZIO.fail("Game plan JSON too large (max 20 KB)").when(gamePlanJson.length > 20 * 1024)
+      _ <- ZIO.fail("Game plan name must be 1-100 characters").when(name.trim.isEmpty || name.trim.length > 100)
       teamOpt <- teamRepo.findById(teamId).transact(xa).orDie
       team <- ZIO.fromOption(teamOpt).orElseFail("Team not found")
       _ <- ZIO.fail("Only team owner can save game plan").when(!team.ownerUserId.contains(userId))
@@ -1211,8 +1698,11 @@ case class LeagueServiceLive(
             else {
               val matchdayOpt = matchdayForDate(start, league.totalMatchdays, today)
               matchdayOpt match {
-                case Some(md) if league.currentMatchday + 1 == md =>
-                  playMatchday(league.id, league.createdByUserId).ignore
+                case Some(md) if league.currentMatchday < md =>
+                  val overdue = md - league.currentMatchday
+                  ZIO.foreachDiscard(1 to overdue.min(5))(_ =>
+                    playMatchday(league.id, league.createdByUserId).tapError(e => ZIO.logError(s"Scheduled matchday failed for league=${league.id.value.take(8)}: $e")).ignore
+                  )
                 case _ => ZIO.unit
               }
             }
@@ -1264,16 +1754,17 @@ case class LeagueServiceLive(
   def exportMatchLogsWithFilters(matchIds: List[MatchId], format: String, userId: UserId, leagueIdOpt: Option[LeagueId], fromMatchdayOpt: Option[Int], toMatchdayOpt: Option[Int], teamIdOpt: Option[TeamId], eventTypesOpt: Option[List[String]]): ZIO[Any, String, String] = {
     val useFilters = leagueIdOpt.nonEmpty && (fromMatchdayOpt.nonEmpty || toMatchdayOpt.nonEmpty || teamIdOpt.nonEmpty)
     val idsZ = if (useFilters) {
-      val lid = leagueIdOpt.get
-      ensureUserHasAccessToLeague(userId, lid) *>
-        matchRepo.listByLeague(lid).transact(xa).orDie.map { matches =>
-          val filtered = matches.filter { m =>
-            val mdOk = fromMatchdayOpt.forall(m.matchday >= _) && toMatchdayOpt.forall(m.matchday <= _)
-            val teamOk = teamIdOpt.forall(tid => m.homeTeamId == tid || m.awayTeamId == tid)
-            mdOk && teamOk
+      leagueIdOpt.fold(ZIO.fail("leagueId is required when using filters"): ZIO[Any, String, List[MatchId]]) { lid =>
+        ensureUserHasAccessToLeague(userId, lid) *>
+          matchRepo.listByLeague(lid).transact(xa).orDie.map { matches =>
+            val filtered = matches.filter { m =>
+              val mdOk = fromMatchdayOpt.forall(m.matchday >= _) && toMatchdayOpt.forall(m.matchday <= _)
+              val teamOk = teamIdOpt.forall(tid => m.homeTeamId == tid || m.awayTeamId == tid)
+              mdOk && teamOk
+            }
+            filtered.sortBy(_.matchday).take(ExportMatchIdsMax).map(_.id)
           }
-          filtered.sortBy(_.matchday).take(ExportMatchIdsMax).map(_.id)
-        }
+      }
     } else ZIO.succeed(matchIds)
     idsZ.flatMap(ids => exportMatchLogs(ids, format, userId, eventTypesOpt))
   }
@@ -1394,7 +1885,7 @@ case class LeagueServiceLive(
         case "Shot" | "Goal" =>
           e.actorPlayerId.foreach { shooter =>
             val prev = base.getOrElse(shooter, PlayerAggAdv())
-            val onTarget = if (e.outcome.contains("Saved") || e.outcome.contains("Success")) 1 else 0
+            val onTarget = if (e.eventType == "Goal" || e.outcome.contains("Saved") || e.outcome.contains("Success")) 1 else 0
             val xg = e.metadata.get("xG").flatMap(s => scala.util.Try(s.toDouble).toOption).getOrElse(if (e.eventType == "Goal") 0.5 else 0.2)
             base(shooter) = prev.copy(shots = prev.shots + 1, shotsOnTarget = prev.shotsOnTarget + onTarget, xg = prev.xg + xg)
           }
@@ -1503,7 +1994,7 @@ case class LeagueServiceLive(
         h2h = matches.filter(m => (m.homeTeamId == teamId1 && m.awayTeamId == teamId2) || (m.homeTeamId == teamId2 && m.awayTeamId == teamId1))
           .filter(_.status == MatchStatus.Played)
           .sortBy(-_.matchday)
-          .take(math.min(limit, 20))
+          .take(math.min(limit, 50))
         referees <- refereeRepo.listByLeague(leagueId).transact(xa).orDie
         refByName = referees.map(r => r.id -> r.name).toMap
       } yield h2h.map(m => MatchDto(m.id.value, m.leagueId.value, m.matchday, m.homeTeamId.value, m.awayTeamId.value, m.scheduledAt.toEpochMilli, m.status.toString, m.homeGoals, m.awayGoals, m.refereeId.value, refByName.get(m.refereeId))))
@@ -1542,16 +2033,8 @@ case class LeagueServiceLive(
         teams <- teamRepo.listByLeague(leagueId).transact(xa).orDie
         teamIds = teams.map(_.id).toSet
         _ <- ZIO.fail("Both players must be in this league").when(!teamIds.contains(p1.teamId) || !teamIds.contains(p2.teamId))
-        dto1 = PlayerDto(
-          p1.id.value, p1.teamId.value, p1.firstName, p1.lastName, p1.preferredPositions.toList,
-          p1.injury.map(i => s"return matchday ${i.returnAtMatchday}"), p1.freshness, p1.morale,
-          physical = p1.physical, technical = p1.technical, mental = p1.mental, traits = p1.traits
-        )
-        dto2 = PlayerDto(
-          p2.id.value, p2.teamId.value, p2.firstName, p2.lastName, p2.preferredPositions.toList,
-          p2.injury.map(i => s"return matchday ${i.returnAtMatchday}"), p2.freshness, p2.morale,
-          physical = p2.physical, technical = p2.technical, mental = p2.mental, traits = p2.traits
-        )
+        dto1 = toPlayerDto(p1)
+        dto2 = toPlayerDto(p2)
         stats1 = allRows.find(_.playerId == playerId1.value)
         stats2 = allRows.find(_.playerId == playerId2.value)
       } yield ComparePlayersDto(dto1, dto2, stats1, stats2))
@@ -1628,14 +2111,16 @@ case class LeagueServiceLive(
 
   def addToShortlistForUser(teamId: TeamId, userId: UserId, playerId: PlayerId): ZIO[Any, String, Unit] =
     for {
-      _ <- getTeamForUser(teamId, userId)
+      team <- getTeamForUser(teamId, userId)
+      _ <- ZIO.fail("Forbidden: you do not own this team").when(!team.ownerUserId.contains(userId.value))
       now = Instant.now()
       _ <- shortlistRepo.add(teamId, playerId, now).transact(xa).orDie
     } yield ()
 
   def removeFromShortlistForUser(teamId: TeamId, userId: UserId, playerId: PlayerId): ZIO[Any, String, Unit] =
     for {
-      _ <- getTeamForUser(teamId, userId)
+      team <- getTeamForUser(teamId, userId)
+      _ <- ZIO.fail("Forbidden: you do not own this team").when(!team.ownerUserId.contains(userId.value))
       _ <- shortlistRepo.remove(teamId, playerId).transact(xa).orDie
     } yield ()
 
@@ -1658,7 +2143,7 @@ case class LeagueServiceLive(
       teamOpt <- teamRepo.findById(teamId).transact(xa).orDie
       team <- ZIO.fromOption(teamOpt).orElseFail("Team not found")
       _ <- ZIO.fail("Only team owner can create scouting reports").when(!team.ownerUserId.contains(userId))
-      id <- ZIO.succeed(java.util.UUID.randomUUID().toString)
+      id <- ZIO.succeed(IdGen.token)
       now = Instant.now()
       r = ScoutingReport(id, teamId, playerId, rating.max(0.0).min(10.0), notes.take(2000), now)
       _ <- scoutingReportRepo.create(r).transact(xa).orDie
@@ -1666,8 +2151,10 @@ case class LeagueServiceLive(
       pname = playerOpt.map(p => s"${p.firstName} ${p.lastName}").getOrElse(playerId.value)
     } yield ScoutingReportDto(r.id, r.teamId.value, r.playerId.value, pname, r.rating, r.notes, r.createdAt.toEpochMilli)
 
-  def applyPressConference(matchId: MatchId, teamId: TeamId, userId: UserId, phase: String, tone: String): ZIO[Any, String, Unit] =
+  def applyPressConference(matchId: MatchId, teamId: TeamId, userId: UserId, phase: String, tone: String): ZIO[Any, String, Unit] = {
+    val pcKey = (matchId.value, teamId.value, phase.toLowerCase)
     for {
+      _ <- ZIO.fail("Press conference already given for this phase").when(Option(pressConferenceGiven.putIfAbsent(pcKey, true)).isDefined)
       mOpt <- matchRepo.findById(matchId).transact(xa).orDie
       m    <- ZIO.fromOption(mOpt).orElseFail("Match not found")
       _    <- ensureUserHasAccessToLeague(userId, m.leagueId)
@@ -1682,11 +2169,15 @@ case class LeagueServiceLive(
         case _                      => 0.0
       }
       players <- playerRepo.listByTeam(teamId).transact(xa).orDie
-      _       <- ZIO.foreachDiscard(players)(p =>
-        playerRepo.updateFreshnessMorale(p.id, p.freshness, (p.morale + delta).max(0.0).min(1.0)).transact(xa).orDie
-      )
+      _       <- {
+        import cats.implicits.*
+        players.traverse_(p =>
+          playerRepo.updateFreshnessMorale(p.id, p.freshness, (p.morale + delta).max(0.0).min(1.0))
+        ).transact(xa).orDie
+      }
       _       <- ZIO.logInfo(s"Press conference: match=${matchId.value.take(8)} team=${teamId.value.take(8)} phase=$phase tone=$tone moraleDelta=$delta")
     } yield ()
+  }
 
   def getMetrics: ZIO[Any, Nothing, MetricsDto] =
     matchRepo.countPlayedAndTotalGoals.transact(xa).orDie.map { case (count, totalGoals) =>
@@ -1738,8 +2229,15 @@ case class LeagueServiceLive(
     }
 
   private def matchdayForDate(startDate: LocalDate, totalMatchdays: Int, date: LocalDate): Option[Int] = {
-    val dates = Iterator.iterate(startDate)(d => if (d.getDayOfWeek == DayOfWeek.WEDNESDAY) d.plusDays(3) else d.plusDays(4)).take(totalMatchdays).toList
-    dates.indexOf(date) match { case -1 => None; case i => Some(i + 1) }
+    def nextMatchdayDate(matchdayIndex: Int): LocalDate = {
+      if (matchdayIndex == 0) startDate
+      else {
+        val weekOffset = (matchdayIndex / 2) * 7
+        val midWeek = (matchdayIndex % 2) * 3
+        startDate.plusDays(weekOffset + midWeek)
+      }
+    }
+    (0 until totalMatchdays).find(i => nextMatchdayDate(i) == date).map(_ + 1)
   }
 
   /** MODELE §9.3: estimated price = basePrice * (overall/10)^2; bot accepts if amount >= this. */
@@ -1765,7 +2263,8 @@ case class LeagueServiceLive(
     LeagueDto(
       l.id.value, l.name, l.teamCount, l.currentMatchday, l.totalMatchdays,
       l.seasonPhase.toString, l.homeAdvantage, l.startDate.map(_.toString),
-      l.createdByUserId.value, l.createdAt.toEpochMilli, l.timezone.getId
+      l.createdByUserId.value, l.createdAt.toEpochMilli, l.timezone.getId,
+      l.leagueSystemName, l.tier
     )
 
   private def toTeamDto(t: Team): TeamDto =
@@ -1853,6 +2352,7 @@ case class LeagueServiceLive(
       passValueTotal = s.passValueTotal.map { case (h, a) => List(h, a) },
       passValueUnderPressureTotal = s.passValueUnderPressureTotal.map { case (h, a) => List(h, a) },
       passValueUnderPressureByPlayer = s.passValueUnderPressureByPlayer,
-      influenceScoreByPlayer = s.influenceScoreByPlayer
+      influenceScoreByPlayer = s.influenceScoreByPlayer,
+      highlights = s.highlights
     )
 }

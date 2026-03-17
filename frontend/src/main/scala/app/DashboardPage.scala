@@ -13,16 +13,18 @@ object DashboardPage {
     val createSuccess = Var[Option[String]](None)
     val busy = Var(false)
     val leagues = Var[List[LeagueDto]](Nil)
+    val leaguesLoading = Var(true)
     val leaguesError = Var[Option[String]](None)
     val invitationTokenInput = Var("")
     val invitations = Var[List[InvitationDto]](Nil)
 
     def loadLeagues(): Unit = AppState.token.now() match {
-      case None => ()
+      case None => leaguesLoading.set(false)
       case Some(tok) =>
+        leaguesLoading.set(true)
         App.runZio(ApiClient.listLeagues(tok)) {
-          case Right(l) => leagues.set(l); leaguesError.set(None)
-          case Left(m)  => leaguesError.set(Some(m))
+          case Right(l) => leagues.set(l); leaguesError.set(None); leaguesLoading.set(false)
+          case Left(m)  => leaguesError.set(Some(m)); leaguesLoading.set(false)
         }
     }
     def loadInvitations(): Unit = AppState.token.now() match {
@@ -30,16 +32,14 @@ object DashboardPage {
       case Some(tok) =>
         App.runZio(ApiClient.listInvitations(tok)) {
           case Right(inv) => invitations.set(inv)
-          case Left(_)    => invitations.set(Nil)
+          case Left(msg)  => invitations.set(Nil); leaguesError.set(Some(s"Zaproszenia: $msg"))
         }
     }
-    loadLeagues()
-    loadInvitations()
-
     def doLogout(): Unit = {
-      org.scalajs.dom.window.localStorage.removeItem("fm-game-jwt")
+      org.scalajs.dom.window.localStorage.removeItem(AuthConstants.TokenKey)
       AppState.token.set(None)
       AppState.currentUser.set(None)
+      AppState.currentPage.set(Page.Login)
     }
 
     def doCreateLeague(): Unit = {
@@ -72,6 +72,7 @@ object DashboardPage {
 
     div(
       cls := "max-w-2xl mx-auto",
+      onMountCallback { _ => loadLeagues(); loadInvitations() },
       div(
         cls := "flex justify-between items-center mb-6",
         child <-- AppState.currentUser.signal.map {
@@ -133,14 +134,15 @@ object DashboardPage {
         },
         div(
           cls := "space-y-2",
-          child <-- leagues.signal.map { list =>
-            if (list.isEmpty) div(cls := "text-gray-500 text-sm", "No leagues yet. Create one below.")
+          child <-- leagues.signal.combineWith(leaguesLoading.signal).map { case (list, loading) =>
+            if (loading) div(cls := "text-gray-500 text-sm", "Ładowanie lig...")
+            else if (list.isEmpty) div(cls := "text-gray-500 text-sm", "No leagues yet. Create one below.")
             else div(
               list.map { l =>
                 button(
                   cls := "w-full text-left px-4 py-2 rounded bg-gray-200 dark:bg-gray-700 hover:bg-gray-300 dark:hover:bg-gray-600",
                   s"${l.name} (${l.seasonPhase}, MD ${l.currentMatchday}/${l.totalMatchdays})",
-                  onClick --> { _ => AppState.selectedLeagueId.set(Some(l.id)) }
+                  onClick --> { _ => AppState.currentPage.set(Page.LeagueView(l.id)) }
                 )
               }: _*
             )

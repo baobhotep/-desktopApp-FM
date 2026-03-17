@@ -25,6 +25,7 @@ enum TransferOfferStatus:
   case Accepted
   case Rejected
   case Withdrawn
+  case Countered
 
 enum MatchSquadSource:
   case Manual

@@ -15,7 +15,7 @@ object AdvancedAnalytics {
     val counts = scala.collection.mutable.Map.empty[(Int, Int), Int]
     var prevZone: Option[Int] = None
     events.foreach { e =>
-      val zone = e.zone.filter(z => z >= 1 && z <= 12)
+      val zone = e.zone.filter(z => z >= 1 && z <= PitchModel.TotalZones)
       if (moveTypes.contains(e.eventType) && zone.isDefined) {
         prevZone.foreach { pz =>
           if (pz != zone.get) counts((pz, zone.get)) = counts.getOrElse((pz, zone.get), 0) + 1
@@ -28,19 +28,21 @@ object AdvancedAnalytics {
     counts.toMap
   }
 
-  /** Value iteration dla xT: V(z) = baseThreat(z) + gamma * sum_z' P(z'|z)*V(z'). Zwraca mapa strefa -> wartość. */
+  /** Value iteration dla xT: V(z) = baseThreat(z) + gamma * sum_z' P(z'|z)*V(z'). Converges when max delta < epsilon. */
   def xTValueIteration(
     transitionCounts: Map[(Int, Int), Int],
     baseZoneThreat: Int => Double,
     gamma: Double = 0.95,
-    maxIterations: Int = 50
+    maxIterations: Int = 50,
+    epsilon: Double = 1e-6
   ): Map[Int, Double] = {
-    val zones = (1 to 12).toSet
-    val fromZones = transitionCounts.keys.map(_._1).toSet
+    val zones = (1 to PitchModel.TotalZones).toSet
     val outgoing = transitionCounts.groupBy(_._1._1).view.mapValues(_.map { case (k, v) => (k._2, v) }.toMap).toMap
     val totalFrom = outgoing.view.mapValues(_.values.sum).toMap
     var V = zones.map(z => z -> baseZoneThreat(z)).toMap
-    for (_ <- 1 to maxIterations) {
+    var iteration = 0
+    var converged = false
+    while (iteration < maxIterations && !converged) {
       val Vnew = zones.map { z =>
         val base = baseZoneThreat(z)
         val trans = totalFrom.getOrElse(z, 0)
@@ -49,7 +51,10 @@ object AdvancedAnalytics {
         } else 0.0
         z -> (base + gamma * expectedNext)
       }.toMap
+      val maxDelta = zones.map(z => math.abs(Vnew(z) - V(z))).max
       V = Vnew
+      iteration += 1
+      converged = maxDelta < epsilon
     }
     V
   }
@@ -80,11 +85,11 @@ object AdvancedAnalytics {
 
   /** OBSO (Off-Ball Scoring Opportunity): prawdopodobieństwo strzału ze strefy. Używamy baseZoneThreat z DxT. */
   def obsByZone(baseZoneThreat: Int => Double): Map[Int, Double] =
-    (1 to 12).map(z => z -> (baseZoneThreat(z) / 0.2).min(1.0)).toMap
+    (1 to PitchModel.TotalZones).map(z => z -> (baseZoneThreat(z) / 0.2).min(1.0)).toMap
 
   /** Tortuosity ścieżki piłki: stosunek sumy odległości między kolejnymi strefami do odległości liniowej (strefa start -> koniec). */
   def ballTortuosity(events: List[MatchEventRecord]): Option[Double] = {
-    val zones = events.flatMap(_.zone).filter(z => z >= 1 && z <= 12)
+    val zones = events.flatMap(_.zone).filter(z => z >= 1 && z <= PitchModel.TotalZones)
     if (zones.size < 2) return None
     def dist(z1: Int, z2: Int): Double = {
       val (a, b) = PitchModel.zoneCenters.getOrElse(z1, (52.5, 34.0))
@@ -98,7 +103,7 @@ object AdvancedAnalytics {
 
   /** Metabolic load (przybliżenie): suma odległości między strefami przy przejściach piłki (metry). */
   def metabolicLoadFromZonePath(events: List[MatchEventRecord]): Double = {
-    val zones = events.flatMap(_.zone).filter(z => z >= 1 && z <= 12)
+    val zones = events.flatMap(_.zone).filter(z => z >= 1 && z <= PitchModel.TotalZones)
     if (zones.size < 2) 0.0
     else zones.sliding(2).map { pair =>
       if (pair.size == 2) {
@@ -113,13 +118,11 @@ object AdvancedAnalytics {
   def nashPenalty2x2(
     payoffLL: Double, payoffLR: Double, payoffRL: Double, payoffRR: Double
   ): (Double, Double) = {
-    val a = payoffLL - payoffRL
-    val b = payoffLR - payoffRR
-    val denom = a + b
+    val denom = payoffLL - payoffLR - payoffRL + payoffRR
     if (math.abs(denom) < 1e-9) (0.5, 0.5)
     else {
-      val pShooterL = b / denom
-      val pGkL = (payoffRR - payoffLR) / (payoffLL - payoffLR - payoffRL + payoffRR + 1e-9)
+      val pShooterL = (payoffRR - payoffRL) / denom
+      val pGkL = (payoffRR - payoffLR) / denom
       (pShooterL.max(0).min(1), pGkL.max(0).min(1))
     }
   }
@@ -131,9 +134,9 @@ object AdvancedAnalytics {
   def shotContextByZoneFromEvents(events: List[MatchEventRecord]): Map[Int, (Double, Double)] = {
     val defByZone = scala.collection.mutable.Map.empty[Int, scala.collection.mutable.ListBuffer[Int]]
     val gkByZone = scala.collection.mutable.Map.empty[Int, scala.collection.mutable.ListBuffer[Double]]
-    (1 to 12).foreach { z => defByZone(z) = scala.collection.mutable.ListBuffer.empty; gkByZone(z) = scala.collection.mutable.ListBuffer.empty }
+    (1 to PitchModel.TotalZones).foreach { z => defByZone(z) = scala.collection.mutable.ListBuffer.empty; gkByZone(z) = scala.collection.mutable.ListBuffer.empty }
     events.foreach { e =>
-      if ((e.eventType == "Shot" || e.eventType == "Goal") && e.zone.exists(z => z >= 1 && z <= 12)) {
+      if ((e.eventType == "Shot" || e.eventType == "Goal") && e.zone.exists(z => z >= 1 && z <= PitchModel.TotalZones)) {
         val z = e.zone.get
         val defenders = e.metadata.get("defendersInCone").flatMap(s => scala.util.Try(s.toInt).toOption).getOrElse(0)
         val gkDist = e.metadata.get("gkDistance").flatMap(s => scala.util.Try(s.toDouble).toOption).getOrElse(0.0)
@@ -141,7 +144,7 @@ object AdvancedAnalytics {
         gkByZone(z) += gkDist
       }
     }
-    (1 to 12).map { z =>
+    (1 to PitchModel.TotalZones).map { z =>
       val defList = defByZone(z)
       val gkList = gkByZone(z)
       val avgDef = if (defList.isEmpty) 0.0 else defList.sum.toDouble / defList.size
@@ -154,7 +157,7 @@ object AdvancedAnalytics {
   def setPieceZoneActivityFromEvents(events: List[MatchEventRecord]): Map[String, Map[Int, Int]] = {
     val result = scala.collection.mutable.Map.empty[String, scala.collection.mutable.Map[Int, Int]]
     def add(routineKey: String, zone: Int): Unit = {
-      if (zone >= 1 && zone <= 12) {
+      if (zone >= 1 && zone <= PitchModel.TotalZones) {
         val m = result.getOrElseUpdate(routineKey, scala.collection.mutable.Map.empty.withDefaultValue(0))
         m(zone) = m(zone) + 1
       }
@@ -165,7 +168,7 @@ object AdvancedAnalytics {
       if (setTypes.contains(e.eventType)) {
         val routine = e.metadata.getOrElse("routine", "default")
         val key = s"${e.eventType}:$routine"
-        val nextZone = events.lift(i + 1).flatMap(_.zone).filter(z => z >= 1 && z <= 12)
+        val nextZone = events.lift(i + 1).flatMap(_.zone).filter(z => z >= 1 && z <= PitchModel.TotalZones)
         nextZone.foreach(add(key, _))
       }
     }
@@ -185,26 +188,30 @@ object AdvancedAnalytics {
       val straight = dist(zones.head, zones.last)
       if (straight < 1e-6) None else Some(pathLen / straight)
     }
-    zonesByPlayer.flatMap { case (pid, zones) => tortuosity(zones.filter(z => z >= 1 && z <= 12)).map(pid -> _) }
+    zonesByPlayer.flatMap { case (pid, zones) => tortuosity(zones.filter(z => z >= 1 && z <= PitchModel.TotalZones)).map(pid -> _) }
   }
 
   /** NMF (§8): przybliżenie macierzy aktywności stałych fragmentów (routine × strefa) jako W*H, 2 komponenty. Zwraca (W: routine -> [w1,w2], H: lista 2 wektorów stref). */
   def setPiecePatternsNMF(activity: Map[String, Map[Int, Int]], numComponents: Int = 2, maxIter: Int = 50): (Map[String, List[Double]], List[Map[Int, Double]]) = {
     val routines = activity.keys.toIndexedSeq
-    if (routines.isEmpty || numComponents < 1) return (Map.empty, List.fill(numComponents)((1 to 12).map(_ -> 0.0).toMap))
-    val V = routines.map(r => (1 to 12).map(z => activity(r).getOrElse(z, 0).toDouble).toArray).toArray
-    var W = Array.fill(routines.size)(Array.fill(numComponents)(1.0 + math.random * 0.5))
-    var H = Array.fill(numComponents)((1 to 12).map(_ => 1.0 + math.random * 0.5).toArray)
+    val nz = PitchModel.TotalZones
+    if (routines.isEmpty || numComponents < 1) return (Map.empty, List.fill(numComponents)((1 to nz).map(_ -> 0.0).toMap))
+    val rng = new scala.util.Random(routines.hashCode)
+    val V = routines.map(r => (1 to nz).map(z => activity(r).getOrElse(z, 0).toDouble).toArray).toArray
+    var W = Array.fill(routines.size)(Array.fill(numComponents)(1.0 + rng.nextDouble() * 0.5))
+    var H = Array.fill(numComponents)((1 to nz).map(_ => 1.0 + rng.nextDouble() * 0.5).toArray)
     for (_ <- 1 to maxIter) {
-      val WH = Array.ofDim[Double](routines.size, 12)
-      for (i <- W.indices; j <- 0 until 12) WH(i)(j) = (0 until numComponents).map(k => W(i)(k) * H(k)(j)).sum + 1e-10
+      val WH1 = Array.ofDim[Double](routines.size, nz)
+      for (i <- W.indices; j <- 0 until nz) WH1(i)(j) = (0 until numComponents).map(k => W(i)(k) * H(k)(j)).sum + 1e-10
       for (i <- W.indices; k <- 0 until numComponents)
-        W(i)(k) = W(i)(k) * (0 until 12).map(j => V(i)(j) * H(k)(j) / WH(i)(j)).sum / (0 until 12).map(j => H(k)(j)).sum.max(1e-10)
-      for (k <- 0 until numComponents; j <- 0 until 12)
-        H(k)(j) = H(k)(j) * (0 until routines.size).map(i => V(i)(j) * W(i)(k) / WH(i)(j)).sum / (0 until routines.size).map(i => W(i)(k)).sum.max(1e-10)
+        W(i)(k) = W(i)(k) * (0 until nz).map(j => V(i)(j) * H(k)(j) / WH1(i)(j)).sum / (0 until nz).map(j => H(k)(j)).sum.max(1e-10)
+      val WH2 = Array.ofDim[Double](routines.size, nz)
+      for (i <- W.indices; j <- 0 until nz) WH2(i)(j) = (0 until numComponents).map(k => W(i)(k) * H(k)(j)).sum + 1e-10
+      for (k <- 0 until numComponents; j <- 0 until nz)
+        H(k)(j) = H(k)(j) * (0 until routines.size).map(i => V(i)(j) * W(i)(k) / WH2(i)(j)).sum / (0 until routines.size).map(i => W(i)(k)).sum.max(1e-10)
     }
     val wMap = routines.zipWithIndex.map { case (r, i) => r -> W(i).toList }.toMap
-    val hList = H.map(row => (1 to 12).zip(row).toMap).toList
+    val hList = H.map(row => (1 to nz).zip(row).toMap).toList
     (wMap, hList)
   }
 
@@ -212,24 +219,31 @@ object AdvancedAnalytics {
   def setPieceRoutineClusters(activity: Map[String, Map[Int, Int]], k: Int = 2): Map[String, Int] = {
     val routines = activity.keys.toIndexedSeq
     if (routines.size < 2 || k < 2) return routines.map(_ -> 0).toMap
-    val vecs = routines.map(r => (1 to 12).map(z => activity(r).getOrElse(z, 0).toDouble).toArray)
-    val sumSq = vecs.map(v => v.map(x => x * x).sum).zipWithIndex
-    var centroids = (0 until k).map(_ => (1 to 12).map(_ => 2.0 + math.random * 2).toArray).toArray
+    val nz = PitchModel.TotalZones
+    val rng = new scala.util.Random(routines.hashCode)
+    val vecs = routines.map(r => (1 to nz).map(z => activity(r).getOrElse(z, 0).toDouble).toArray)
+    var centroids = (0 until k).map(_ => (1 to nz).map(_ => 2.0 + rng.nextDouble() * 2).toArray).toArray
     for (_ <- 1 to 30) {
-      val assign = vecs.map(v => (0 until k).minBy(c => (0 until 12).map(j => (v(j) - centroids(c)(j)) * (v(j) - centroids(c)(j))).sum))
+      val assign = vecs.map(v => (0 until k).minBy(c => (0 until nz).map(j => (v(j) - centroids(c)(j)) * (v(j) - centroids(c)(j))).sum))
       for (c <- 0 until k) {
         val in = assign.zipWithIndex.filter(_._1 == c).map(_._2)
         if (in.nonEmpty)
-          for (j <- 0 until 12) centroids(c)(j) = in.map(i => vecs(i)(j)).sum / in.size
+          for (j <- 0 until nz) centroids(c)(j) = in.map(i => vecs(i)(j)).sum / in.size
       }
     }
-    val assign = vecs.map(v => (0 until k).minBy(c => (0 until 12).map(j => (v(j) - centroids(c)(j)) * (v(j) - centroids(c)(j))).sum))
+    val assign = vecs.map(v => (0 until k).minBy(c => (0 until nz).map(j => (v(j) - centroids(c)(j)) * (v(j) - centroids(c)(j))).sum))
     routines.zip(assign).toMap
   }
 
   /** Prognoza Poisson: P(wygrana gosp.), P(remis), P(wygrana gości) z xG. */
   def poissonPrognosis(xgHome: Double, xgAway: Double, maxGoals: Int = 10): (Double, Double, Double) = {
-    def poisson(lambda: Double)(k: Int): Double = math.exp(-lambda) * math.pow(lambda, k) / (1 to k).product
+    def poisson(lambda: Double)(k: Int): Double = {
+      if (lambda <= 0.0) { if (k == 0) 1.0 else 0.0 }
+      else {
+        val logFactorial = (1 to k).foldLeft(0.0)((acc, i) => acc + math.log(i))
+        math.exp(-lambda + k * math.log(lambda) - logFactorial)
+      }
+    }
     var pHome = 0.0
     var pDraw = 0.0
     var pAway = 0.0
@@ -243,13 +257,13 @@ object AdvancedAnalytics {
   /** Voronoi z centrum aktywności: środek masy akcji drużyn (strefy ważone liczbą akcji), potem dla każdej strefy przypisanie do drużyny, której środek jest bliżej. Zwraca Map(zone -> homeShare 0.0 lub 1.0). */
   def voronoiZoneFromCentroids(events: List[MatchEventRecord], homeTeamId: TeamId, awayTeamId: TeamId): Map[Int, Double] = {
     val actionTypes = Set("Pass", "LongPass", "Dribble", "Shot", "Goal", "Cross")
-    val homeCounts = (1 to 12).map(z => z -> 0).toMap
-    val awayCounts = (1 to 12).map(z => z -> 0).toMap
+    val homeCounts = (1 to PitchModel.TotalZones).map(z => z -> 0).toMap
+    val awayCounts = (1 to PitchModel.TotalZones).map(z => z -> 0).toMap
     val hMut = scala.collection.mutable.Map(homeCounts.toSeq*)
     val aMut = scala.collection.mutable.Map(awayCounts.toSeq*)
     events.foreach { e =>
       if (actionTypes.contains(e.eventType)) {
-        val zone = e.zone.filter(z => z >= 1 && z <= 12).getOrElse(1)
+        val zone = e.zone.filter(z => z >= 1 && z <= PitchModel.TotalZones).getOrElse(1)
         e.teamId match {
           case Some(tid) if tid == homeTeamId => hMut(zone) = hMut(zone) + 1
           case Some(tid) if tid == awayTeamId => aMut(zone) = aMut(zone) + 1
@@ -271,7 +285,7 @@ object AdvancedAnalytics {
     }
     val (hcx, hcy) = centroid(hMut.toMap)
     val (acx, acy) = centroid(aMut.toMap)
-    (1 to 12).map { z =>
+    (1 to PitchModel.TotalZones).map { z =>
       val (zx, zy) = PitchModel.zoneCenters.getOrElse(z, (52.5, 34.0))
       val dHome = PitchModel.distance(zx, zy, hcx, hcy)
       val dAway = PitchModel.distance(zx, zy, acx, acy)
@@ -291,10 +305,10 @@ object AdvancedAnalytics {
     val passTypes = Set("Pass", "LongPass")
     for (i <- events.indices) {
       val e = events(i)
-      if (passTypes.contains(e.eventType) && e.outcome.contains("Success") && e.zone.exists(z => z >= 1 && z <= 12)) {
+      if (passTypes.contains(e.eventType) && e.outcome.contains("Success") && e.zone.exists(z => z >= 1 && z <= PitchModel.TotalZones)) {
         val next = events.lift(i + 1)
         val sameTeam = next.flatMap(_.teamId).exists(tid => e.teamId.contains(tid))
-        val receiverZone = next.flatMap(_.zone).filter(z => z >= 1 && z <= 12)
+        val receiverZone = next.flatMap(_.zone).filter(z => z >= 1 && z <= PitchModel.TotalZones)
         if (sameTeam && receiverZone.isDefined) {
           val fromZ = e.zone.get
           val toZ = receiverZone.get
@@ -323,11 +337,11 @@ object AdvancedAnalytics {
   /** Voronoi-like: udział gospodarzy w akcjach (Pass, LongPass, Dribble, Shot, Cross) w każdej strefie 1–12. Zwraca Map(zone -> homeShare 0.0..1.0). */
   def zoneDominanceFromEvents(events: List[MatchEventRecord], homeTeamId: TeamId, awayTeamId: TeamId): Map[Int, Double] = {
     val actionTypes = Set("Pass", "LongPass", "Dribble", "Shot", "Goal", "Cross")
-    val byZone = (1 to 12).map(z => z -> (0, 0)).toMap
+    val byZone = (1 to PitchModel.TotalZones).map(z => z -> (0, 0)).toMap
     val counts = scala.collection.mutable.Map(byZone.toSeq*)
     events.foreach { e =>
       if (actionTypes.contains(e.eventType)) {
-        val zone = e.zone.filter(z => z >= 1 && z <= 12).getOrElse(1)
+        val zone = e.zone.filter(z => z >= 1 && z <= PitchModel.TotalZones).getOrElse(1)
         e.teamId match {
           case Some(tid) if tid == homeTeamId => counts(zone) = (counts(zone)._1 + 1, counts(zone)._2)
           case Some(tid) if tid == awayTeamId => counts(zone) = (counts(zone)._1, counts(zone)._2 + 1)
@@ -335,7 +349,7 @@ object AdvancedAnalytics {
         }
       }
     }
-    (1 to 12).map { z =>
+    (1 to PitchModel.TotalZones).map { z =>
       val (h, a) = counts(z)
       val total = h + a
       val share = if (total > 0) h.toDouble / total else 0.5

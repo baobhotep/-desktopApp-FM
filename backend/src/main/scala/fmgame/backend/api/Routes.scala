@@ -2,6 +2,7 @@ package fmgame.backend.api
 
 import fmgame.backend.service.*
 import fmgame.backend.auth.*
+import fmgame.backend.domain.AppError
 import fmgame.shared.api.*
 import fmgame.shared.domain.*
 import zio.*
@@ -19,7 +20,8 @@ class ApiRoutes(
   userService: UserService,
   leagueService: LeagueService,
   jwtSecret: String,
-  adminSecret: Option[String]
+  adminSecret: Option[String],
+  allowedOrigin: Option[String] = None
 ) {
 
   private def errBody(code: String, message: String): String =
@@ -48,6 +50,17 @@ class ApiRoutes(
   private def runZio[A](eff: ZIO[Any, String, A]): ZIO[Any, Nothing, Either[String, A]] =
     eff.tapError(err => ZIO.logWarning(s"API error: $err")).either
 
+  private def classifyError(err: String): Response = {
+    val appErr = AppError.fromServiceError(err)
+    appErr match {
+      case _: AppError.Forbidden       => errResp(Status.Forbidden, "FORBIDDEN", appErr.message)
+      case _: AppError.NotFound        => errResp(Status.NotFound, "NOT_FOUND", appErr.message)
+      case _: AppError.ValidationError => errResp(Status.BadRequest, "VALIDATION_ERROR", appErr.message)
+      case _: AppError.Conflict        => errResp(Status.Conflict, "CONFLICT", appErr.message)
+      case _: AppError.General         => errResp(Status.BadRequest, "BAD_REQUEST", appErr.message)
+    }
+  }
+
   private val unauthorized: Response = errResp(Status.Unauthorized, "UNAUTHORIZED", "Missing or invalid token")
   private def forbidden(msg: String): Response = errResp(Status.Forbidden, "FORBIDDEN", msg)
 
@@ -55,8 +68,12 @@ class ApiRoutes(
     req.path.segments.toList.lift(index).map(_.toString)
 
   val app: zio.http.Routes[Any, Response] = zio.http.Routes(
-    Method.GET / "metrics" -> handler {
-      leagueService.getMetrics.map(metrics => jsonResp(metrics, Status.Ok))
+    Method.GET / "metrics" -> handler { (req: Request) =>
+      val adminOk = adminSecret.exists(s => req.rawHeader("X-Admin-Secret").exists(h => java.security.MessageDigest.isEqual(s.getBytes, h.getBytes)))
+      val userOk = extractUserId(req).isDefined
+      if (adminOk || userOk)
+        leagueService.getMetrics.map(metrics => jsonResp(metrics, Status.Ok))
+      else ZIO.succeed(unauthorized)
     },
 
     Method.POST / "api" / "v1" / "auth" / "register" -> handler { (req: Request) =>
@@ -93,7 +110,7 @@ class ApiRoutes(
         case None => ZIO.succeed(unauthorized)
         case Some(userId) =>
           runZio(leagueService.listLeagues(userId)).map {
-            case Left(err)   => errResp(Status.BadRequest, "BAD_REQUEST", err)
+            case Left(err)   => classifyError(err)
             case Right(list) => jsonResp(list, Status.Ok)
           }
       }
@@ -104,7 +121,7 @@ class ApiRoutes(
         case None => ZIO.succeed(unauthorized)
         case Some(userId) =>
           runZio(leagueService.listPendingInvitations(userId)).map {
-            case Left(err)   => errResp(Status.BadRequest, "BAD_REQUEST", err)
+            case Left(err)   => classifyError(err)
             case Right(list) => jsonResp(list, Status.Ok)
           }
       }
@@ -118,7 +135,7 @@ class ApiRoutes(
             val tz = body.timezone.getOrElse("Europe/Warsaw")
             if (!isValidTimezone(tz)) ZIO.succeed(errResp(Status.BadRequest, "BAD_REQUEST", s"Invalid timezone: $tz"))
             else runZio(leagueService.create(body.name, body.teamCount, body.myTeamName, tz, creatorId)).map {
-              case Left(err)  => errResp(Status.BadRequest, "BAD_REQUEST", err)
+              case Left(err)  => classifyError(err)
               case Right((league, team)) => jsonResp(CreateLeagueResponse(league, team), Status.Created)
             }
           }.orElseSucceed(errResp(Status.BadRequest, "BAD_REQUEST", "Invalid JSON"))
@@ -130,7 +147,7 @@ class ApiRoutes(
         case None => ZIO.succeed(unauthorized)
         case Some(userId) =>
           runZio(leagueService.getLeagueForUser(LeagueId(leagueId), userId)).map {
-            case Left(err) => if (err == "Forbidden") forbidden(err) else errResp(Status.NotFound, "NOT_FOUND", err)
+            case Left(err) => classifyError(err)
             case Right(league) => jsonResp(league, Status.Ok)
           }
       }
@@ -141,7 +158,7 @@ class ApiRoutes(
         case None => ZIO.succeed(unauthorized)
         case Some(userId) =>
           runZio(leagueService.getTableForUser(LeagueId(leagueId), userId)).map {
-            case Left(err) => if (err == "Forbidden") forbidden(err) else errResp(Status.NotFound, "NOT_FOUND", err)
+            case Left(err) => classifyError(err)
             case Right(table) => jsonResp(table, Status.Ok)
           }
       }
@@ -152,7 +169,7 @@ class ApiRoutes(
         case None => ZIO.succeed(unauthorized)
         case Some(userId) =>
           runZio(leagueService.getLeaguePlayerStatsForUser(LeagueId(leagueId), userId)).map {
-            case Left(err)  => if (err == "Forbidden") forbidden(err) else errResp(Status.NotFound, "NOT_FOUND", err)
+            case Left(err)  => classifyError(err)
             case Right(stats) => jsonResp(stats, Status.Ok)
           }
       }
@@ -163,7 +180,7 @@ class ApiRoutes(
         case None => ZIO.succeed(unauthorized)
         case Some(userId) =>
           runZio(leagueService.getLeaguePlayerAdvancedStatsForUser(LeagueId(leagueId), userId)).map {
-            case Left(err)  => if (err == "Forbidden") forbidden(err) else errResp(Status.NotFound, "NOT_FOUND", err)
+            case Left(err)  => classifyError(err)
             case Right(stats) => jsonResp(stats, Status.Ok)
           }
       }
@@ -174,7 +191,7 @@ class ApiRoutes(
         case None => ZIO.succeed(unauthorized)
         case Some(userId) =>
           runZio(leagueService.getTrainingPlanForUser(TeamId(teamId), userId)).map {
-            case Left(err)  => errResp(Status.BadRequest, "BAD_REQUEST", err)
+            case Left(err)  => classifyError(err)
             case Right(plan) => jsonResp(plan, Status.Ok)
           }
       }
@@ -186,7 +203,7 @@ class ApiRoutes(
         case Some(userId) =>
           parseBody[UpsertTrainingPlanRequest](req).flatMap { body =>
             runZio(leagueService.upsertTrainingPlanForUser(TeamId(teamId), userId, body.week)).map {
-              case Left(err)  => errResp(Status.BadRequest, "BAD_REQUEST", err)
+              case Left(err)  => classifyError(err)
               case Right(plan) => jsonResp(plan, Status.Ok)
             }
           }.orElseSucceed(errResp(Status.BadRequest, "BAD_REQUEST", "Invalid JSON"))
@@ -198,7 +215,7 @@ class ApiRoutes(
         case None => ZIO.succeed(unauthorized)
         case Some(userId) =>
           runZio(leagueService.listTeamsForUser(LeagueId(leagueId), userId)).map {
-            case Left(err) => if (err == "Forbidden") forbidden(err) else errResp(Status.NotFound, "NOT_FOUND", err)
+            case Left(err) => classifyError(err)
             case Right(teams) => jsonResp(teams, Status.Ok)
           }
       }
@@ -212,7 +229,7 @@ class ApiRoutes(
           val qOpt = req.url.queryParam("q")
           val minOverallOpt = req.url.queryParam("minOverall").flatMap(s => scala.util.Try(s.toDouble).toOption)
           runZio(leagueService.listLeaguePlayersForUser(LeagueId(leagueId), userId, posOpt, minOverallOpt, qOpt)).map {
-            case Left(err) => if (err == "Forbidden") forbidden(err) else errResp(Status.BadRequest, "BAD_REQUEST", err)
+            case Left(err) => classifyError(err)
             case Right(list) => jsonResp(list, Status.Ok)
           }
       }
@@ -223,7 +240,7 @@ class ApiRoutes(
         case None => ZIO.succeed(unauthorized)
         case Some(userId) =>
           runZio(leagueService.getShortlistForUser(TeamId(teamId), userId)).map {
-            case Left(err) => errResp(Status.BadRequest, "BAD_REQUEST", err)
+            case Left(err) => classifyError(err)
             case Right(list) => jsonResp(list, Status.Ok)
           }
       }
@@ -235,7 +252,7 @@ class ApiRoutes(
         case Some(userId) =>
           parseBody[AddToShortlistRequest](req).flatMap { body =>
             runZio(leagueService.addToShortlistForUser(TeamId(teamId), userId, PlayerId(body.playerId))).map {
-              case Left(err) => errResp(Status.BadRequest, "BAD_REQUEST", err)
+              case Left(err) => classifyError(err)
               case Right(_)  => jsonResp((), Status.Ok)
             }
           }.orElseSucceed(errResp(Status.BadRequest, "BAD_REQUEST", "Invalid JSON"))
@@ -247,7 +264,7 @@ class ApiRoutes(
         case None => ZIO.succeed(unauthorized)
         case Some(userId) =>
           runZio(leagueService.removeFromShortlistForUser(TeamId(teamId), userId, PlayerId(playerId))).map {
-            case Left(err) => errResp(Status.BadRequest, "BAD_REQUEST", err)
+            case Left(err) => classifyError(err)
             case Right(_)  => jsonResp((), Status.Ok)
           }
       }
@@ -258,7 +275,7 @@ class ApiRoutes(
         case None => ZIO.succeed(unauthorized)
         case Some(userId) =>
           runZio(leagueService.listScoutingReportsForUser(TeamId(teamId), userId)).map {
-            case Left(err) => errResp(Status.BadRequest, "BAD_REQUEST", err)
+            case Left(err) => classifyError(err)
             case Right(list) => jsonResp(list, Status.Ok)
           }
       }
@@ -270,7 +287,7 @@ class ApiRoutes(
         case Some(userId) =>
           parseBody[CreateScoutingReportRequest](req).flatMap { body =>
             runZio(leagueService.createScoutingReportForUser(TeamId(teamId), userId, PlayerId(body.playerId), body.rating, body.notes)).map {
-              case Left(err) => errResp(Status.BadRequest, "BAD_REQUEST", err)
+              case Left(err) => classifyError(err)
               case Right(r)  => jsonResp(r, Status.Ok)
             }
           }.orElseSucceed(errResp(Status.BadRequest, "BAD_REQUEST", "Invalid JSON"))
@@ -284,7 +301,7 @@ class ApiRoutes(
           val limitOpt = req.url.queryParam("limit").flatMap(s => scala.util.Try(s.toInt).toOption)
           val offsetOpt = req.url.queryParam("offset").flatMap(s => scala.util.Try(s.toInt).toOption)
           runZio(leagueService.getFixturesForUser(LeagueId(leagueId), limitOpt, offsetOpt, userId)).map {
-            case Left(err) => if (err == "Forbidden") forbidden(err) else errResp(Status.NotFound, "NOT_FOUND", err)
+            case Left(err) => classifyError(err)
             case Right(fixtures) => jsonResp(fixtures, Status.Ok)
           }
       }
@@ -296,10 +313,13 @@ class ApiRoutes(
         case Some(userId) =>
           val t1 = req.url.queryParam("teamId1").getOrElse("")
           val t2 = req.url.queryParam("teamId2").getOrElse("")
-          val limit = req.url.queryParam("limit").flatMap(s => scala.util.Try(s.toInt).toOption).getOrElse(10)
-          runZio(leagueService.getH2HForUser(LeagueId(leagueId), TeamId(t1), TeamId(t2), limit, userId)).map {
-            case Left(err) => if (err == "Forbidden") forbidden(err) else errResp(Status.BadRequest, "BAD_REQUEST", err)
-            case Right(matches) => jsonResp(matches, Status.Ok)
+          if (t1.isEmpty || t2.isEmpty) ZIO.succeed(errResp(Status.BadRequest, "BAD_REQUEST", "teamId1 and teamId2 are required"))
+          else {
+            val limit = req.url.queryParam("limit").flatMap(s => scala.util.Try(s.toInt).toOption).getOrElse(10).min(50)
+            runZio(leagueService.getH2HForUser(LeagueId(leagueId), TeamId(t1), TeamId(t2), limit, userId)).map {
+              case Left(err) => classifyError(err)
+              case Right(matches) => jsonResp(matches, Status.Ok)
+            }
           }
       }
     }.sandbox,
@@ -310,7 +330,7 @@ class ApiRoutes(
         case Some(userId) =>
           val matchdayOpt = req.url.queryParam("matchday").flatMap(s => scala.util.Try(s.toInt).toOption)
           runZio(leagueService.getMatchdayPrognosisForUser(LeagueId(leagueId), matchdayOpt, userId)).map {
-            case Left(err) => if (err == "Forbidden") forbidden(err) else errResp(Status.BadRequest, "BAD_REQUEST", err)
+            case Left(err) => classifyError(err)
             case Right(prognoses) => jsonResp(prognoses, Status.Ok)
           }
       }
@@ -322,8 +342,9 @@ class ApiRoutes(
         case Some(userId) =>
           val pid1 = req.url.queryParam("playerId1").getOrElse("")
           val pid2 = req.url.queryParam("playerId2").getOrElse("")
-          runZio(leagueService.getComparePlayersForUser(LeagueId(leagueId), PlayerId(pid1), PlayerId(pid2), userId)).map {
-            case Left(err) => if (err == "Forbidden") forbidden(err) else errResp(Status.BadRequest, "BAD_REQUEST", err)
+          if (pid1.isEmpty || pid2.isEmpty) ZIO.succeed(errResp(Status.BadRequest, "BAD_REQUEST", "playerId1 and playerId2 are required"))
+          else runZio(leagueService.getComparePlayersForUser(LeagueId(leagueId), PlayerId(pid1), PlayerId(pid2), userId)).map {
+            case Left(err) => classifyError(err)
             case Right(dto) => jsonResp(dto, Status.Ok)
           }
       }
@@ -335,7 +356,7 @@ class ApiRoutes(
         case Some(inviterId) =>
           parseBody[InviteRequest](req).flatMap { body =>
             runZio(leagueService.createInvitation(LeagueId(leagueId), body.email, inviterId)).map {
-              case Left(err) => errResp(Status.BadRequest, "BAD_REQUEST", err)
+              case Left(err) => classifyError(err)
               case Right(inv) => jsonResp(inv, Status.Created)
             }
           }.orElseSucceed(errResp(Status.BadRequest, "BAD_REQUEST", "Invalid JSON"))
@@ -348,7 +369,7 @@ class ApiRoutes(
         case Some(userId) =>
           parseBody[AcceptInvitationRequest](req).flatMap { body =>
             runZio(leagueService.acceptInvitation(body.token, body.teamName, userId)).map {
-              case Left(err) => errResp(Status.BadRequest, "BAD_REQUEST", err)
+              case Left(err) => classifyError(err)
               case Right((league, team)) => jsonResp(AcceptInvitationResponse(league, team), Status.Ok)
             }
           }.orElseSucceed(errResp(Status.BadRequest, "BAD_REQUEST", "Invalid JSON"))
@@ -361,7 +382,7 @@ class ApiRoutes(
         case Some(userId) =>
           parseBody[StartSeasonRequest](req).flatMap { body =>
             runZio(leagueService.startSeason(LeagueId(leagueId), userId, body.startDate)).map {
-              case Left(err) => errResp(Status.BadRequest, "BAD_REQUEST", err)
+              case Left(err) => classifyError(err)
               case Right(league) => jsonResp(league, Status.Ok)
             }
           }.orElseSucceed(errResp(Status.BadRequest, "BAD_REQUEST", "Invalid JSON"))
@@ -374,7 +395,7 @@ class ApiRoutes(
         case Some(userId) =>
           parseBody[AddBotsRequest](req).flatMap { body =>
             runZio(leagueService.addBots(LeagueId(leagueId), userId, body.count)).map {
-              case Left(err) => errResp(Status.BadRequest, "BAD_REQUEST", err)
+              case Left(err) => classifyError(err)
               case Right(_) => Response.status(Status.Created)
             }
           }.orElseSucceed(errResp(Status.BadRequest, "BAD_REQUEST", "Invalid JSON"))
@@ -386,7 +407,7 @@ class ApiRoutes(
         case None => ZIO.succeed(unauthorized)
         case Some(userId) =>
           runZio(leagueService.playMatchday(LeagueId(leagueId), userId)).map {
-            case Left(err) => errResp(Status.BadRequest, "BAD_REQUEST", err)
+            case Left(err) => classifyError(err)
             case Right(_) => jsonResp((), Status.Ok)
           }
       }
@@ -397,7 +418,7 @@ class ApiRoutes(
         case None => ZIO.succeed(unauthorized)
         case Some(userId) =>
           runZio(leagueService.getMatchForUser(MatchId(matchId), userId)).map {
-            case Left(err) => if (err == "Forbidden") forbidden(err) else errResp(Status.NotFound, "NOT_FOUND", err)
+            case Left(err) => classifyError(err)
             case Right(m) => jsonResp(m, Status.Ok)
           }
       }
@@ -410,7 +431,7 @@ class ApiRoutes(
           val limitOpt = req.url.queryParam("limit").flatMap(s => scala.util.Try(s.toInt).toOption)
           val offsetOpt = req.url.queryParam("offset").flatMap(s => scala.util.Try(s.toInt).toOption)
           runZio(leagueService.getMatchLogForUser(MatchId(matchId), limitOpt, offsetOpt, userId)).map {
-            case Left(err) => if (err == "Forbidden") forbidden(err) else errResp(Status.NotFound, "NOT_FOUND", err)
+            case Left(err) => classifyError(err)
             case Right(log) => jsonResp(log, Status.Ok)
           }
       }
@@ -426,7 +447,7 @@ class ApiRoutes(
             teamId <- ZIO.fromOption(teamIdOpt).orElseFail("Missing teamId query param")
           } yield (body, teamId)).flatMap { case (body, teamId) =>
             runZio(leagueService.applyPressConference(MatchId(matchId), TeamId(teamId), userId, body.phase, body.tone)).map {
-              case Left(err) => if (err == "Forbidden") forbidden(err) else errResp(Status.BadRequest, "BAD_REQUEST", err)
+              case Left(err) => classifyError(err)
               case Right(_)  => Response.json(io.circe.Json.obj("status" -> io.circe.Json.fromString("ok")).noSpaces).status(Status.Ok)
             }
           }.orElseSucceed(errResp(Status.BadRequest, "BAD_REQUEST", "Invalid request"))
@@ -438,7 +459,7 @@ class ApiRoutes(
         case None => ZIO.succeed(unauthorized)
         case Some(userId) =>
           runZio(leagueService.getMatchSquadsForUser(MatchId(matchId), userId)).map {
-            case Left(err) => if (err == "Forbidden") forbidden(err) else errResp(Status.NotFound, "NOT_FOUND", err)
+            case Left(err) => classifyError(err)
             case Right(squads) => jsonResp(squads, Status.Ok)
           }
       }
@@ -451,7 +472,7 @@ class ApiRoutes(
           val teamIdOpt = req.url.queryParam("teamId")
           ZIO.fromOption(teamIdOpt).flatMap { teamId =>
             runZio(leagueService.getAssistantTipForUser(MatchId(matchId), TeamId(teamId), userId)).map {
-              case Left(err) => if (err == "Forbidden") forbidden(err) else errResp(Status.NotFound, "NOT_FOUND", err)
+              case Left(err) => classifyError(err)
               case Right(dto) => jsonResp(dto, Status.Ok)
             }
           }.orElseSucceed(errResp(Status.BadRequest, "BAD_REQUEST", "Missing teamId query param"))
@@ -464,7 +485,7 @@ class ApiRoutes(
         case Some(userId) =>
           parseBody[SubmitMatchSquadRequest](req).flatMap { body =>
             runZio(leagueService.submitMatchSquad(MatchId(matchId), TeamId(squadTeamId), userId, body)).map {
-              case Left(err) => errResp(Status.BadRequest, "BAD_REQUEST", err)
+              case Left(err) => classifyError(err)
               case Right(squad) => jsonResp(squad, Status.Ok)
             }
           }.orElseSucceed(errResp(Status.BadRequest, "BAD_REQUEST", "Invalid JSON"))
@@ -476,7 +497,7 @@ class ApiRoutes(
         case None => ZIO.succeed(unauthorized)
         case Some(userId) =>
           runZio(leagueService.getTeamForUser(TeamId(teamId), userId)).map {
-            case Left(err) => if (err == "Forbidden") forbidden(err) else errResp(Status.NotFound, "NOT_FOUND", err)
+            case Left(err) => classifyError(err)
             case Right(team) => jsonResp(team, Status.Ok)
           }
       }
@@ -487,7 +508,7 @@ class ApiRoutes(
         case None => ZIO.succeed(unauthorized)
         case Some(userId) =>
           runZio(leagueService.getTeamPlayersForUser(TeamId(teamId), userId)).map {
-            case Left(err) => if (err == "Forbidden") forbidden(err) else errResp(Status.NotFound, "NOT_FOUND", err)
+            case Left(err) => classifyError(err)
             case Right(players) => jsonResp(players, Status.Ok)
           }
       }
@@ -498,7 +519,7 @@ class ApiRoutes(
         case None => ZIO.succeed(unauthorized)
         case Some(userId) =>
           runZio(leagueService.getTeamGamePlansForUser(TeamId(teamId), userId)).map {
-            case Left(err) => if (err == "Forbidden") forbidden(err) else errResp(Status.NotFound, "NOT_FOUND", err)
+            case Left(err) => classifyError(err)
             case Right(plans) => jsonResp(plans, Status.Ok)
           }
       }
@@ -509,7 +530,7 @@ class ApiRoutes(
         case None => ZIO.succeed(unauthorized)
         case Some(userId) =>
           runZio(leagueService.getGamePlanSnapshotForUser(TeamId(teamId), GamePlanSnapshotId(snapshotId), userId)).map {
-            case Left(err) => if (err == "Forbidden") forbidden(err) else errResp(Status.NotFound, "NOT_FOUND", err)
+            case Left(err) => classifyError(err)
             case Right(detail) => jsonResp(detail, Status.Ok)
           }
       }
@@ -521,7 +542,7 @@ class ApiRoutes(
         case Some(userId) =>
           parseBody[SaveGamePlanRequest](req).flatMap { body =>
             runZio(leagueService.saveGamePlan(TeamId(teamId), userId, body.name, body.gamePlanJson)).map {
-              case Left(err) => errResp(Status.BadRequest, "BAD_REQUEST", err)
+              case Left(err) => classifyError(err)
               case Right(snap) => jsonResp(snap, Status.Created)
             }
           }.orElseSucceed(errResp(Status.BadRequest, "BAD_REQUEST", "Invalid JSON"))
@@ -533,7 +554,7 @@ class ApiRoutes(
         case None => ZIO.succeed(unauthorized)
         case Some(userId) =>
           runZio(leagueService.getTransferWindowsForUser(LeagueId(leagueId), userId)).map {
-            case Left(err) => if (err == "Forbidden") forbidden(err) else errResp(Status.NotFound, "NOT_FOUND", err)
+            case Left(err) => classifyError(err)
             case Right(windows) => jsonResp(windows, Status.Ok)
           }
       }
@@ -549,7 +570,7 @@ class ApiRoutes(
             case None => ZIO.succeed(unauthorized)
             case Some(userId) =>
               runZio(leagueService.getTransferOffersForUser(LeagueId(lid), teamIdOpt.map(TeamId.apply), userId)).map {
-                case Left(err) => if (err == "Forbidden") forbidden(err) else errResp(Status.NotFound, "NOT_FOUND", err)
+                case Left(err) => classifyError(err)
                 case Right(offers) => jsonResp(offers, Status.Ok)
               }
           }
@@ -562,7 +583,7 @@ class ApiRoutes(
         case Some(userId) =>
           parseBody[CreateTransferOfferRequest](req).flatMap { body =>
             runZio(leagueService.createTransferOffer(LeagueId(leagueId), userId, body)).map {
-              case Left(err) => errResp(Status.BadRequest, "BAD_REQUEST", err)
+              case Left(err) => classifyError(err)
               case Right(offer) => jsonResp(offer, Status.Created)
             }
           }.orElseSucceed(errResp(Status.BadRequest, "BAD_REQUEST", "Invalid JSON"))
@@ -574,7 +595,7 @@ class ApiRoutes(
         case None => ZIO.succeed(unauthorized)
         case Some(userId) =>
           runZio(leagueService.acceptTransferOffer(TransferOfferId(offerId), userId)).map {
-            case Left(err) => errResp(Status.BadRequest, "BAD_REQUEST", err)
+            case Left(err) => classifyError(err)
             case Right(_) => jsonResp((), Status.Ok)
           }
       }
@@ -585,9 +606,25 @@ class ApiRoutes(
         case None => ZIO.succeed(unauthorized)
         case Some(userId) =>
           runZio(leagueService.rejectTransferOffer(TransferOfferId(offerId), userId)).map {
-            case Left(err) => errResp(Status.BadRequest, "BAD_REQUEST", err)
+            case Left(err) => classifyError(err)
             case Right(_) => jsonResp((), Status.Ok)
           }
+      }
+    }.sandbox,
+
+    Method.POST / "api" / "v1" / "transfer-offers" / PathCodec.string("offerId") / "counter" -> handler { (offerId: String, req: Request) =>
+      extractUserId(req) match {
+        case None => ZIO.succeed(unauthorized)
+        case Some(userId) =>
+          parseBody[CounterTransferOfferRequest](req).flatMap { body =>
+            scala.util.Try(BigDecimal(body.counterAmount.toString)).fold(
+              _ => ZIO.succeed(errResp(Status.BadRequest, "BAD_REQUEST", "Invalid counter amount")),
+              amount => runZio(leagueService.counterTransferOffer(TransferOfferId(offerId), userId, amount)).map {
+                case Left(err) => classifyError(err)
+                case Right(offer) => jsonResp(offer, Status.Ok)
+              }
+            )
+          }.orElseSucceed(errResp(Status.BadRequest, "BAD_REQUEST", "Invalid JSON"))
       }
     }.sandbox,
 
@@ -597,7 +634,7 @@ class ApiRoutes(
         case Some(userId) =>
           parseBody[UpdatePlayerRequest](req).flatMap { body =>
             runZio(leagueService.updatePlayer(PlayerId(playerId), userId, body)).map {
-              case Left(err) => errResp(Status.BadRequest, "BAD_REQUEST", err)
+              case Left(err) => classifyError(err)
               case Right(player) => jsonResp(player, Status.Ok)
             }
           }.orElseSucceed(errResp(Status.BadRequest, "BAD_REQUEST", "Invalid JSON"))
@@ -619,7 +656,7 @@ class ApiRoutes(
               body.teamId.map(TeamId.apply),
               body.eventTypes
             )).map {
-              case Left(err) => errResp(Status.BadRequest, "BAD_REQUEST", err)
+              case Left(err) => classifyError(err)
               case Right(out) =>
                 val contentType = if (body.format.equalsIgnoreCase("csv")) "text/csv; charset=utf-8" else "application/json; charset=utf-8"
                 Response(Status.Ok, headers = Headers(Header.Custom("Content-Type", contentType)), body = Body.fromString(out))
@@ -630,7 +667,7 @@ class ApiRoutes(
 
     Method.POST / "api" / "v1" / "admin" / "models" / PathCodec.string("kind") -> handler { (kind: String, req: Request) =>
       val adminOk = adminSecret.exists { secret =>
-        req.rawHeader("X-Admin-Secret").exists(_ == secret)
+        req.rawHeader("X-Admin-Secret").exists(h => java.security.MessageDigest.isEqual(secret.getBytes, h.getBytes))
       }
       if (!adminOk) ZIO.succeed(forbidden("Admin access required"))
       else
@@ -645,7 +682,14 @@ class ApiRoutes(
     }.sandbox
   ) @@ cors(
     CorsConfig(
-      allowedOrigin = _ => Some(AccessControlAllowOrigin.All),
+      allowedOrigin = allowedOrigin match {
+        case Some(origin) => { (o: Origin) =>
+          val rendered = o.renderedValue
+          val allowed = rendered == origin || rendered == s"https://$origin" || rendered == s"http://$origin"
+          if (allowed) Some(AccessControlAllowOrigin.Specific(o)) else None
+        }
+        case None => _ => Some(AccessControlAllowOrigin.All)
+      },
       allowedMethods = AccessControlAllowMethods.All,
       allowedHeaders = AccessControlAllowHeaders.All
     )

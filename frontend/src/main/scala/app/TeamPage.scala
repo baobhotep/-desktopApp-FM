@@ -125,10 +125,9 @@ object TeamPage {
         }
     }
 
-    load()
-
     div(
       cls := "max-w-2xl mx-auto",
+      onMountCallback { _ => load() },
       button(
         cls := "mb-4 px-3 py-1 text-sm bg-gray-200 dark:bg-gray-700 rounded hover:bg-gray-300",
         "← Back",

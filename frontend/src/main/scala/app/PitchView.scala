@@ -25,24 +25,34 @@ object PitchView {
         dragging.set(Some(idx))
       }
 
+    val nodeRefs = scala.collection.mutable.Map.empty[Int, dom.html.Element]
+
     def handleMouseMove(ev: MouseEvent): Unit =
       if (draggable) {
         dragging.now() match {
           case Some(idx) =>
             val el = ev.currentTarget.asInstanceOf[dom.html.Element]
             val r = el.getBoundingClientRect()
-            val relX = (ev.clientX - r.left) / r.width
-            val relY = (ev.clientY - r.top) / r.height
-            val x = clamp(relX)
-            val y = clamp(relY)
-            positions.update { list =>
-              val arr = list.padTo(11, (0.5, 0.5)).take(11).toArray
-              if (idx >= 0 && idx < arr.length) {
-                arr(idx) = (x, y)
-                arr.toList
-              } else list
+            val x = clamp((ev.clientX - r.left) / r.width)
+            val y = clamp((ev.clientY - r.top) / r.height)
+            nodeRefs.get(idx).foreach { node =>
+              node.style.setProperty("left", s"${x * 100}%")
+              node.style.setProperty("top", s"${y * 100}%")
             }
           case _ =>
+        }
+      }
+
+    def commitDragPosition(): Unit =
+      dragging.now().foreach { idx =>
+        nodeRefs.get(idx).foreach { node =>
+          val left = node.style.getPropertyValue("left").replace("%", "").toDoubleOption.map(_ / 100.0).getOrElse(0.5)
+          val top = node.style.getPropertyValue("top").replace("%", "").toDoubleOption.map(_ / 100.0).getOrElse(0.5)
+          positions.update { list =>
+            val arr = list.padTo(11, (0.5, 0.5)).take(11).toArray
+            if (idx >= 0 && idx < arr.length) { arr(idx) = (left, top); arr.toList }
+            else list
+          }
         }
       }
 
@@ -52,8 +62,9 @@ object PitchView {
         cls := "relative rounded-lg overflow-hidden border-2 border-green-700 bg-green-800 pitch-aspect",
         tabIndex := 0,
         onMouseMove --> { ev => handleMouseMove(ev) },
-        onMouseLeave --> { _ => dragging.set(None) },
-        onMouseUp --> { _ => dragging.set(None) },
+        onMouseLeave --> { _ => commitDragPosition(); dragging.set(None) },
+        onMouseUp --> { _ => commitDragPosition(); dragging.set(None) },
+        onUnmountCallback { _ => nodeRefs.clear() },
         // linie boiska / grafika
         div(cls := "absolute inset-0 border-[1px] border-green-300/60 rounded-lg pointer-events-none"),
         // linia środkowa
@@ -81,6 +92,7 @@ object PitchView {
                 val el = ctx.thisNode.ref.asInstanceOf[dom.html.Div]
                 el.style.setProperty("left", leftPct)
                 el.style.setProperty("top", topPct)
+                nodeRefs(idx) = el
               },
               role := "button",
               child.text <-- selectedPlayers.combineWith(playerNames).map { case (sel, names) =>

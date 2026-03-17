@@ -71,8 +71,6 @@ object MatchSquadPage {
         }
       }
     }
-    load()
-
     def onGamePlanSelected(snapshotId: String): Unit =
       if (snapshotId.isEmpty) {
         selectedGamePlanId.set(None)
@@ -90,7 +88,7 @@ object MatchSquadPage {
       val formation = selectedFormation.now()
       if (base.nonEmpty && base != "{}" && selectedGamePlanId.now().isDefined) base
       else {
-        def esc(s: String): String = s.replace("\\", "\\\\").replace("\"", "\\\"")
+        def esc(s: String): String = s.replace("\\", "\\\\").replace("\"", "\\\"").replace("\n", "\\n").replace("\r", "\\r").replace("\t", "\\t")
         val pz = pressZones.now().toList.sorted
         val cz = counterZone.now()
         val trigger = if (pz.nonEmpty || cz.nonEmpty)
@@ -153,6 +151,7 @@ object MatchSquadPage {
       case Some(tok) =>
         val sel = selected.now()
         if (sel.size != 11) { error.set(Some("Wybierz dokładnie 11 zawodników")); return }
+        if (sel.values.toSet.size != 11) { error.set(Some("Nie można wybrać tego samego zawodnika na dwie pozycje")); return }
         val slots = FormationPresets.slots(selectedFormation.now())
         val lineup = slots.zipWithIndex.map { case (pos, i) => LineupSlotDto(sel(i), pos) }
         val gamePlanJson = buildGamePlanJson()
@@ -162,7 +161,7 @@ object MatchSquadPage {
         App.runZio(ApiClient.submitMatchSquad(tok, matchId, teamId, SubmitMatchSquadRequest(lineup, gamePlanJson))) {
           case Right(_) =>
             success.set(Some("Skład zapisany"))
-            AppState.lineupContext.set(None)
+            goBack()
             busy.set(false)
           case Left(m) =>
             error.set(Some(m))
@@ -172,6 +171,7 @@ object MatchSquadPage {
 
     div(
       cls := "max-w-xl mx-auto",
+      onMountCallback { _ => load() },
       button(
         cls := "mb-4 px-3 py-1 text-sm bg-gray-200 dark:bg-gray-700 rounded hover:bg-gray-300",
         "← Wstecz",
@@ -207,19 +207,15 @@ object MatchSquadPage {
             opt("4-3-3", "4-3-3"), opt("4-4-2", "4-4-2"), opt("4-2-3-1", "4-2-3-1"), opt("3-5-2", "3-5-2"), opt("Własna", "Własna (przeciągnij pozycje)")
           )
         ),
-        child <-- selectedFormation.signal.combineWith(players.signal).combineWith(selected.signal).map { case (formation, ps, selMap) =>
+        child <-- selectedFormation.signal.combineWith(players.signal).map { case (formation, ps) =>
           val slots = FormationPresets.slots(formation)
-          val basePositions =
-            if (formation == "Własna") customSlotPositions
-            else {
-              // dla gotowych formacji użyj domyślnych pozycji 4-3-3 jako przybliżenia
-              customSlotPositions.set(FormationPresets.DefaultPositions433)
-              customSlotPositions
-            }
-          val playerNames = Var(ps.map(p => p.id -> s"${p.firstName} ${p.lastName}").toMap)
+          val playerNamesMap = ps.map(p => p.id -> s"${p.firstName} ${p.lastName}").toMap
           div(
+            onMountCallback { _ =>
+              if (formation != "Własna") customSlotPositions.set(FormationPresets.DefaultPositions433)
+            },
             label(cls := "block text-sm font-medium mb-1", if (formation == "Własna") "Boisko (przeciągaj kółka, aby zmienić ustawienie)" else "Boisko (podgląd ustawienia)"),
-            PitchView.render(basePositions, slots, selected.signal, playerNames.signal, formation == "Własna")
+            PitchView.render(customSlotPositions, slots, selected.signal, Val(playerNamesMap).signal, formation == "Własna")
           )
         }
       ),
@@ -336,14 +332,15 @@ object MatchSquadPage {
           h3(cls := "text-sm font-semibold mb-2", "Stałe fragmenty (MVP)"),
           p(cls := "text-xs text-gray-500 mb-2", "Wybierz wykonawców spośród swoich zawodników. Rutyny na razie są prostymi presetami."),
           child <-- players.signal.map { ps =>
-            val opts = (option(com.raquo.laminar.api.L.value := "", "— brak —") +: ps.map(p => option(com.raquo.laminar.api.L.value := p.id, s"${p.firstName} ${p.lastName}"))).toSeq
+            def mkOpts(): Seq[com.raquo.laminar.nodes.ReactiveHtmlElement[org.scalajs.dom.html.Option]] =
+              (option(com.raquo.laminar.api.L.value := "", "— brak —") +: ps.map(p => option(com.raquo.laminar.api.L.value := p.id, s"${p.firstName} ${p.lastName}"))).toSeq
             div(
               cls := "grid grid-cols-1 md:grid-cols-2 gap-2 text-sm",
               div(
                 label(cls := "block mb-0.5", "Wykonawca rożnych"),
                 select(
                   cls := "w-full px-2 py-1 border rounded dark:bg-gray-700",
-                  opts,
+                  mkOpts(),
                   value <-- cornerTaker.signal,
                   onChange.mapToValue --> cornerTaker.writer
                 )
@@ -364,7 +361,7 @@ object MatchSquadPage {
                 label(cls := "block mb-0.5", "Wykonawca wolnych"),
                 select(
                   cls := "w-full px-2 py-1 border rounded dark:bg-gray-700",
-                  opts,
+                  mkOpts(),
                   value <-- freeKickTaker.signal,
                   onChange.mapToValue --> freeKickTaker.writer
                 )
@@ -384,7 +381,7 @@ object MatchSquadPage {
                 label(cls := "block mb-0.5", "Wykonawca karnych"),
                 select(
                   cls := "w-full px-2 py-1 border rounded dark:bg-gray-700",
-                  opts,
+                  mkOpts(),
                   value <-- penaltyTaker.signal,
                   onChange.mapToValue --> penaltyTaker.writer
                 )
@@ -393,7 +390,7 @@ object MatchSquadPage {
                 label(cls := "block mb-0.5", "Wykonawca wrzutów z autu"),
                 select(
                   cls := "w-full px-2 py-1 border rounded dark:bg-gray-700",
-                  opts,
+                  mkOpts(),
                   value <-- throwInTaker.signal,
                   onChange.mapToValue --> throwInTaker.writer
                 )

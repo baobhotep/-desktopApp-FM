@@ -13,6 +13,8 @@ trait MatchRepository {
   def findById(id: MatchId): ConnectionIO[Option[Match]]
   def listByLeague(leagueId: LeagueId): ConnectionIO[List[Match]]
   def listByLeagueAndMatchday(leagueId: LeagueId, matchday: Int): ConnectionIO[List[Match]]
+  /** Usuwa wszystkie mecze ligi i powiązane dane (match_squads, match_result_logs) – przed startem nowego sezonu. */
+  def deleteByLeague(leagueId: LeagueId): ConnectionIO[Unit]
   /** Dla endpointu /metrics: liczba rozegranych meczów i suma bramek. */
   def countPlayedAndTotalGoals: ConnectionIO[(Int, Int)]
 }
@@ -70,6 +72,15 @@ object MatchRepository {
           )
         }
       }
+
+    def deleteByLeague(leagueId: LeagueId): ConnectionIO[Unit] = {
+      val lid = leagueId.value
+      for {
+        _ <- sql"DELETE FROM match_squads WHERE match_id IN (SELECT id FROM matches WHERE league_id = $lid)".update.run
+        _ <- sql"DELETE FROM match_result_logs WHERE match_id IN (SELECT id FROM matches WHERE league_id = $lid)".update.run
+        _ <- sql"DELETE FROM matches WHERE league_id = $lid".update.run
+      } yield ()
+    }
 
     def countPlayedAndTotalGoals: ConnectionIO[(Int, Int)] =
       sql"""

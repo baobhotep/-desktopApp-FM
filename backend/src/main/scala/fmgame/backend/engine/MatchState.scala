@@ -34,10 +34,20 @@ case class MatchState(
   justRecoveredInCounterZone: Boolean = false,
   /** Ostatnia routine stałego fragmentu (corner/freeKick) – używana do modyfikatora xG przy następnym strzale. */
   lastSetPieceRoutine: Option[String] = None,
+  /** Obrona rogu przez drużynę defensywną ("zonal"/"man"/"mixed") – używana przy strzale po rogu. */
+  lastSetPieceDefense: Option[String] = None,
   /** Szerokość ustawienia drużyny gospodarzy (1.0 = normal). */
   homeWidthScale: Double = 1.0,
   /** Szerokość ustawienia drużyny gości (1.0 = normal). */
-  awayWidthScale: Double = 1.0
+  awayWidthScale: Double = 1.0,
+  /** Liczba wykonanych zmian drużyny gospodarzy (max 5). */
+  homeSubsUsed: Int = 0,
+  /** Liczba wykonanych zmian drużyny gości (max 5). */
+  awaySubsUsed: Int = 0,
+  /** Gracze z żółtą kartką. */
+  yellowCards: Set[PlayerId] = Set.empty,
+  /** Gracze usunięci z boiska (czerwona/2x żółta/kontuzja bez zmiany). */
+  sentOff: Set[PlayerId] = Set.empty
 ) {
   def possessionHome: Boolean = possession.contains(homeTeamId)
   def scoreDiff: Int = homeGoals - awayGoals
@@ -59,7 +69,7 @@ object MatchState {
     awayWidthScale: Double = 1.0,
     paceAccByPlayer: Option[Map[PlayerId, (Int, Int)]] = None
   ): MatchState = {
-    val ballZone = 6
+    val ballZone = PitchModel.zoneFromXY(PitchModel.PitchLength / 2.0, PitchModel.PitchWidth / 2.0)
     val (homePos, awayPos) = PositionGenerator.all22Positions(
       homeFormation, homePlayerIds, awayFormation, awayPlayerIds, ballZone, possessionHome = true,
       homeCustomPositions, awayCustomPositions, homeWidthScale, awayWidthScale

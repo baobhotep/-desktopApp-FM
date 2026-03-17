@@ -73,7 +73,8 @@ object MatchSummaryDtoCodecSpec extends ZIOSpecDefault {
     passValueTotal = Some(List(0.8, 0.5)),
     passValueUnderPressureTotal = Some(List(0.2, 0.1)),
     passValueUnderPressureByPlayer = Some(Map("p2" -> 0.15)),
-    influenceScoreByPlayer = Some(Map("p1" -> 1.2, "p2" -> 0.9))
+    influenceScoreByPlayer = Some(Map("p1" -> 1.2, "p2" -> 0.9)),
+    highlights = Some(List(Map("minute" -> "12", "type" -> "Goal", "player" -> "p1")))
   )
 
   def spec = suite("MatchSummaryDtoCodec")(
@@ -82,11 +83,19 @@ object MatchSummaryDtoCodecSpec extends ZIOSpecDefault {
       val json = minimalDto.asJson.noSpaces
       val decoded = decode[MatchSummaryDto](json)
       assertTrue(decoded.isRight) &&
-      assertTrue(decoded.exists(_.poissonPrognosis == minimalDto.poissonPrognosis)) &&
-      assertTrue(decoded.exists(_.passValueByPlayer == minimalDto.passValueByPlayer)) &&
-      assertTrue(decoded.exists(_.passValueUnderPressureTotal == minimalDto.passValueUnderPressureTotal)) &&
-      assertTrue(decoded.exists(_.passValueUnderPressureByPlayer == minimalDto.passValueUnderPressureByPlayer)) &&
-      assertTrue(decoded.exists(_.influenceScoreByPlayer == minimalDto.influenceScoreByPlayer))
+      assertTrue(decoded.exists(d =>
+        d.homeGoals == minimalDto.homeGoals &&
+        d.awayGoals == minimalDto.awayGoals &&
+        d.possessionPercent == minimalDto.possessionPercent &&
+        d.xgTotal == minimalDto.xgTotal &&
+        d.fouls == minimalDto.fouls &&
+        d.poissonPrognosis == minimalDto.poissonPrognosis &&
+        d.passValueByPlayer == minimalDto.passValueByPlayer &&
+        d.passValueUnderPressureTotal == minimalDto.passValueUnderPressureTotal &&
+        d.passValueUnderPressureByPlayer == minimalDto.passValueUnderPressureByPlayer &&
+        d.influenceScoreByPlayer == minimalDto.influenceScoreByPlayer &&
+        d.highlights == minimalDto.highlights
+      ))
     }
   )
 }

@@ -50,7 +50,7 @@ object EngineModelFactory {
   def xGModelFromConfig(modelType: String, pathOpt: Option[String]): xGModel =
     (modelType.toLowerCase, pathOpt) match {
       case ("loadable", Some(path)) =>
-        scala.util.Try(scala.io.Source.fromFile(path).mkString).toOption
+        scala.util.Using(scala.io.Source.fromFile(path))(_.mkString).toOption
           .fold[xGModel](FormulaBasedxG)(LoadablexGModel.fromJson)
       case ("onnx", Some(path)) =>
         OnnxXGModel.load(path).getOrElse(FormulaBasedxG)
@@ -89,5 +89,5 @@ object EngineModelFactory {
   /** Buduje xG z pliku (ścieżka do .json lub .onnx). */
   def xGFromPath(path: String): xGModel =
     if (path.endsWith(".onnx")) OnnxXGModel.load(path).getOrElse(FormulaBasedxG)
-    else scala.util.Try(scala.io.Source.fromFile(path).mkString).toOption.fold[xGModel](FormulaBasedxG)(LoadablexGModel.fromJson)
+    else scala.util.Using(scala.io.Source.fromFile(path))(_.mkString).toOption.fold[xGModel](FormulaBasedxG)(LoadablexGModel.fromJson)
 }

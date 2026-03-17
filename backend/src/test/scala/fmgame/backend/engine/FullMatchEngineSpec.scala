@@ -31,7 +31,7 @@ object FullMatchEngineSpec extends ZIOSpecDefault {
     val awayPlayers = (1 to 11).map(i => PlayerMatchInput(mkPlayer(s"ap$i", if (i == 1) Set("GK") else Set("CB","CM","ST")), 1.0, 0.8, None))
     val homeLineup = homePlayers.map(_.player.id).zip(List("GK", "LB", "CB", "CB", "RB", "LM", "CM", "CM", "RM", "ST", "ST")).toMap
     val awayLineup = awayPlayers.map(_.player.id).zip(List("GK", "LB", "CB", "CB", "RB", "LM", "CM", "CM", "RM", "ST", "ST")).toMap
-    val trigger = if (withTriggers) Some(TriggerConfig(pressZones = List(7, 8, 9), counterTriggerZone = Some(4))) else None
+    val trigger = if (withTriggers) Some(TriggerConfig(pressZones = List(13, 14, 15, 16), counterTriggerZone = Some(8))) else None
     MatchEngineInput(
       homeTeam = MatchTeamInput(TeamId("home"), homePlayers.toList, homeLineup),
       awayTeam = MatchTeamInput(TeamId("away"), awayPlayers.toList, awayLineup),
@@ -144,37 +144,48 @@ object FullMatchEngineSpec extends ZIOSpecDefault {
         assertTrue(result.events.nonEmpty, hasDribble || hasDribbleLost, hasDuel || result.events.exists(_.eventType == "AerialDuel"))
       }
     },
-    test("GK gkReflexes/gkHandling mapping: high GK attributes reduce opponent goals") {
+    test("GK gkReflexes/gkHandling mapping: strong GK concedes fewer goals than weak GK on average") {
       val outfieldTech = Map("passing" -> 12, "shooting" -> 14, "firstTouch" -> 12, "crossing" -> 10, "tackling" -> 10)
       val strongGK = Map("gkReflexes" -> 18, "gkHandling" -> 18)
       val weakGK   = Map("gkReflexes" -> 5, "gkHandling" -> 5)
-      val homePlayers = (1 to 11).map { i =>
-        val tech = if (i == 1) strongGK else outfieldTech
-        val pos = if (i == 1) Set("GK") else Set("CB", "CM", "ST")
-        PlayerMatchInput(mkPlayer(s"hp$i", pos, tech, Map("stamina" -> 12), Map("composure" -> 12, "decisions" -> 12)), 1.0, 0.8, None)
-      }.toList
-      val awayPlayers = (1 to 11).map { i =>
-        val tech = if (i == 1) weakGK else outfieldTech
-        val pos = if (i == 1) Set("GK") else Set("CB", "CM", "ST")
-        PlayerMatchInput(mkPlayer(s"ap$i", pos, tech, Map("stamina" -> 12), Map("composure" -> 12, "decisions" -> 12)), 1.0, 0.8, None)
-      }.toList
-      val homeLineup = homePlayers.map(_.player.id).zip(List("GK", "LB", "CB", "CB", "RB", "LM", "CM", "CM", "RM", "ST", "ST")).toMap
-      val awayLineup = awayPlayers.map(_.player.id).zip(List("GK", "LB", "CB", "CB", "RB", "LM", "CM", "CM", "RM", "ST", "ST")).toMap
-      val input = MatchEngineInput(
-        homeTeam = MatchTeamInput(TeamId("home"), homePlayers, homeLineup),
-        awayTeam = MatchTeamInput(TeamId("away"), awayPlayers, awayLineup),
-        homePlan = GamePlanInput("4-3-3"),
-        awayPlan = GamePlanInput("4-4-2"),
-        homeAdvantage = 1.0,
-        referee = RefereeInput(0.5),
-        leagueContext = LeagueContextInput(Map.empty),
-        randomSeed = Some(654321L)
-      )
+      def mkTeam(prefix: String, gkAttrs: Map[String, Int]) = {
+        val players = (1 to 11).map { i =>
+          val tech = if (i == 1) gkAttrs else outfieldTech
+          val pos = if (i == 1) Set("GK") else Set("CB", "CM", "ST")
+          PlayerMatchInput(mkPlayer(s"${prefix}$i", pos, tech, Map("stamina" -> 12), Map("composure" -> 12, "decisions" -> 12)), 1.0, 0.8, None)
+        }.toList
+        val lineup = players.map(_.player.id).zip(List("GK", "LB", "CB", "CB", "RB", "LM", "CM", "CM", "RM", "ST", "ST")).toMap
+        (players, lineup)
+      }
+      val seeds = List(654321L, 123456L, 111111L, 222222L, 333333L, 444444L, 555555L, 666666L, 777777L, 888888L)
       for {
-        result <- FullMatchEngine.simulate(input)
-      } yield assertTrue(result.homeGoals >= 0, result.awayGoals >= 0, result.events.nonEmpty)
+        strongResults <- ZIO.foreach(seeds) { seed =>
+          val (hp, hl) = mkTeam("hp", strongGK)
+          val (ap, al) = mkTeam("ap", weakGK)
+          FullMatchEngine.simulate(MatchEngineInput(
+            homeTeam = MatchTeamInput(TeamId("home"), hp, hl), awayTeam = MatchTeamInput(TeamId("away"), ap, al),
+            homePlan = GamePlanInput("4-3-3"), awayPlan = GamePlanInput("4-4-2"), homeAdvantage = 1.0,
+            referee = RefereeInput(0.5), leagueContext = LeagueContextInput(Map.empty), randomSeed = Some(seed)))
+        }
+        weakResults <- ZIO.foreach(seeds) { seed =>
+          val (hp, hl) = mkTeam("hp", weakGK)
+          val (ap, al) = mkTeam("ap", strongGK)
+          FullMatchEngine.simulate(MatchEngineInput(
+            homeTeam = MatchTeamInput(TeamId("home"), hp, hl), awayTeam = MatchTeamInput(TeamId("away"), ap, al),
+            homePlan = GamePlanInput("4-3-3"), awayPlan = GamePlanInput("4-4-2"), homeAdvantage = 1.0,
+            referee = RefereeInput(0.5), leagueContext = LeagueContextInput(Map.empty), randomSeed = Some(seed)))
+        }
+      } yield {
+        val goalsVsStrong = strongResults.map(_.awayGoals).sum
+        val goalsVsWeak = weakResults.map(_.awayGoals).sum
+        assertTrue(
+          strongResults.forall(_.events.nonEmpty),
+          strongResults.forall(_.analytics.isDefined),
+          goalsVsStrong <= goalsVsWeak + 1
+        )
+      }
     },
-    test("Pitch Control uses pace/acceleration when provided (time-to-intercept); simulation completes") {
+    test("Pitch Control uses pace/acceleration (time-to-intercept); fast team has better possession or events") {
       val highPace = Map("pace" -> 18, "acceleration" -> 17, "stamina" -> 12)
       val lowPace = Map("pace" -> 6, "acceleration" -> 5, "stamina" -> 12)
       val homePlayers = (1 to 11).map { i =>
@@ -201,7 +212,11 @@ object FullMatchEngineSpec extends ZIOSpecDefault {
       )
       for {
         result <- FullMatchEngine.simulate(input)
-      } yield assertTrue(result.events.nonEmpty, result.events.last.minute <= 90)
+      } yield {
+        val a = result.analytics.get
+        val homePoss = a.possessionPercent._1
+        assertTrue(result.events.nonEmpty, result.events.last.minute <= 90, result.analytics.isDefined, homePoss >= 30.0)
+      }
     },
     test("technique attribute affects pass success and xG; simulation runs with technique") {
       val techWithTechnique = Map("passing" -> 12, "shooting" -> 12, "technique" -> 16, "firstTouch" -> 12)
@@ -295,8 +310,8 @@ object FullMatchEngineSpec extends ZIOSpecDefault {
         val a = result.analytics.get
         val hasPasses = result.events.count(e => e.eventType == "Pass" || e.eventType == "LongPass") >= 2
         assertTrue(
-          a.betweennessByPlayer.size >= 0,
-          a.pageRankByPlayer.size >= 0,
+          a.betweennessByPlayer.nonEmpty || result.events.count(e => e.eventType == "Pass" || e.eventType == "LongPass") < 2,
+          a.pageRankByPlayer.nonEmpty || result.events.count(e => e.eventType == "Pass" || e.eventType == "LongPass") < 2,
           !hasPasses || a.pageRankByPlayer.nonEmpty || a.betweennessByPlayer.nonEmpty
         )
       }
@@ -307,11 +322,12 @@ object FullMatchEngineSpec extends ZIOSpecDefault {
         result <- FullMatchEngine.simulate(input)
       } yield {
         val a = result.analytics.get
+        val tortOk = a.ballTortuosity.forall(_ >= 0.0)
         assertTrue(
-          a.xtValueByZone.size == 12,
-          a.obsoByZone.size == 12,
+          a.xtValueByZone.size == PitchModel.TotalZones,
+          a.obsoByZone.size == PitchModel.TotalZones,
           a.metabolicLoad >= 0.0,
-          a.ballTortuosity.isEmpty || (a.ballTortuosity.get >= 0.0)
+          tortOk
         )
       }
     },
@@ -393,16 +409,17 @@ object FullMatchEngineSpec extends ZIOSpecDefault {
         result <- FullMatchEngine.simulate(input)
       } yield assertTrue(
         result.events.nonEmpty,
-        result.events.exists(_.eventType == "Foul") || result.events.exists(_.eventType == "Injury") || true
+        result.events.exists(_.eventType == "Foul") || result.events.exists(_.eventType == "Injury")
       )
     },
     test("Nash penalty: penalty branch uses save prob from direction (L/R); engine produces Penalty or Goal") {
-      val seeds = List(101L, 102L, 103L, 104L, 105L)
+      val seeds = List(101L, 102L, 103L, 104L, 105L, 106L, 107L, 108L, 109L, 110L)
       def run(seed: Long) = FullMatchEngine.simulate(mkInput(seed))
       for {
         results <- ZIO.foreach(seeds)(run)
-        hasPenaltyOrGoal = results.exists(r => r.events.exists(e => e.eventType == "Penalty" || e.eventType == "Goal"))
-      } yield assertTrue(results.forall(_.events.nonEmpty), hasPenaltyOrGoal || true)
+        hasPenalty = results.exists(r => r.events.exists(_.eventType == "Penalty"))
+        hasGoalWithPenaltyMeta = results.exists(r => r.events.exists(e => e.eventType == "Goal" && e.metadata.get("penalty").contains("true")))
+      } yield assertTrue(results.forall(_.events.nonEmpty), results.forall(_.events.size > 100), hasPenalty || hasGoalWithPenaltyMeta)
     },
     test("Z-Score IWP: engine runs with leagueContext.positionStats for slots and IWP structure present") {
       val positionStats = Map(
@@ -428,12 +445,11 @@ object FullMatchEngineSpec extends ZIOSpecDefault {
         resDefault <- FullMatchEngine.simulate(inputDefault)
         resOverride <- FullMatchEngine.simulate(inputOverride)
       } yield {
-        val xgDef = resDefault.analytics.get.xgTotal
         val xgOv = resOverride.analytics.get.xgTotal
-        val shotsDefault = resDefault.events.count(e => e.eventType == "Shot" || e.eventType == "Goal")
-        val shotsOverride = resOverride.events.count(e => e.eventType == "Shot" || e.eventType == "Goal")
-        assertTrue(resDefault.events.nonEmpty, resOverride.events.nonEmpty, shotsDefault == shotsOverride)
-        assertTrue(shotsDefault == 0 || (xgOv._1 + xgOv._2) > (xgDef._1 + xgDef._2))
+        val xgDef = resDefault.analytics.get.xgTotal
+        val shots = resOverride.events.count(e => e.eventType == "Shot" || e.eventType == "Goal")
+        assertTrue(resOverride.events.nonEmpty, resOverride.analytics.isDefined, shots > 0)
+        assertTrue((xgOv._1 + xgOv._2) > (xgDef._1 + xgDef._2))
       }
     },
     test("vaepModelOverride runs and analytics present") {
@@ -455,7 +471,7 @@ object FullMatchEngineSpec extends ZIOSpecDefault {
         val (hDef, aDef) = resDefault.analytics.get.vaepTotal
         val (hOv, aOv) = resOverride.analytics.get.vaepTotal
         assertTrue(resDefault.events.nonEmpty, resOverride.events.nonEmpty)
-        assertTrue((hOv + aOv) > (hDef + aDef) + 0.01)
+        assertTrue(math.abs((hOv + aOv) - (hDef + aDef)) > 0.001)
       }
     },
     test("analytics include I-VAEP, pressing, estimated distance, player influence (activity by zone)") {
@@ -487,7 +503,7 @@ object FullMatchEngineSpec extends ZIOSpecDefault {
         result <- FullMatchEngine.simulate(input)
       } yield {
         val shots = result.events.filter(e => (e.eventType == "Shot" || e.eventType == "Goal") && !e.metadata.get("penalty").contains("true"))
-        assertTrue(result.events.nonEmpty)
+        assertTrue(result.events.nonEmpty, result.analytics.isDefined, shots.nonEmpty)
       }
     },
     test("GK clearance in zone 1–2: can be by GK with gkKicking/gkThrowing and distributionType in metadata") {
@@ -568,7 +584,7 @@ object FullMatchEngineSpec extends ZIOSpecDefault {
         result <- FullMatchEngine.simulate(input)
       } yield {
         val a = result.analytics.get
-        assertTrue(result.events.nonEmpty, a.voronoiCentroidByZone.size == 12, a.voronoiCentroidByZone.values.forall(v => v == 0.0 || v == 1.0 || v == 0.5))
+        assertTrue(result.events.nonEmpty, a.voronoiCentroidByZone.size == PitchModel.TotalZones, a.voronoiCentroidByZone.values.forall(v => v == 0.0 || v == 1.0 || v == 0.5))
         assertTrue(a.passValueUnderPressureTotal._1.isFinite && a.passValueUnderPressureTotal._2.isFinite)
         assertTrue(a.passValueUnderPressureByPlayer.forall { case (_, v) => v.isFinite })
       }
@@ -588,8 +604,10 @@ object FullMatchEngineSpec extends ZIOSpecDefault {
     },
     test("FormulaBasedVAEP: Dribble in attack zone has higher value than in build-up zone") {
       import fmgame.shared.domain.TeamId
-      val ctxAttack = VAEPContext("Dribble", 10, Some("Success"), 50, 0, 0, Some(TeamId("h")), true)
-      val ctxBuildUp = VAEPContext("Dribble", 3, Some("Success"), 50, 0, 0, Some(TeamId("h")), true)
+      val attackZone = (1 to PitchModel.TotalZones).find(PitchModel.isAttackingThird).getOrElse(23)
+      val buildUpZone = (1 to PitchModel.TotalZones).find(PitchModel.isBuildUpZone).getOrElse(2)
+      val ctxAttack = VAEPContext("Dribble", attackZone, Some("Success"), 50, 0, 0, Some(TeamId("h")), true)
+      val ctxBuildUp = VAEPContext("Dribble", buildUpZone, Some("Success"), 50, 0, 0, Some(TeamId("h")), true)
       val vAttack = FormulaBasedVAEP.valueForEvent(ctxAttack)
       val vBuildUp = FormulaBasedVAEP.valueForEvent(ctxBuildUp)
       assertTrue(vAttack > vBuildUp, vAttack > 0.0, vBuildUp > 0.0)

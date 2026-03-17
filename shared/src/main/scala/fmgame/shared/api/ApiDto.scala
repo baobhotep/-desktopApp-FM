@@ -26,7 +26,9 @@ case class LeagueDto(
   startDate: Option[String],
   createdByUserId: String,
   createdAt: Long,
-  timezone: String
+  timezone: String,
+  leagueSystemName: Option[String] = None,
+  tier: Option[Int] = None
 )
 
 case class CreateLeagueRequest(
@@ -69,7 +71,21 @@ case class PlayerDto(
   /** Atrybuty mentalne (np. composure, decisions). */
   mental: Map[String, Int] = Map.empty,
   /** Cechy (np. injuryProne) – wartości 1–20. */
-  traits: Map[String, Int] = Map.empty
+  traits: Map[String, Int] = Map.empty,
+  /** Overall 1–20 (pozycyjny). */
+  overall: Double = 0.0,
+  /** Średnia atrybutów fizycznych 1–20 (do pasków). */
+  physicalAvg: Double = 0.0,
+  /** Średnia atrybutów technicznych 1–20. */
+  technicalAvg: Double = 0.0,
+  /** Średnia atrybutów mentalnych 1–20. */
+  mentalAvg: Double = 0.0,
+  /** Średnia atrybutów defensywnych 1–20. */
+  defenseAvg: Double = 0.0,
+  /** Kondycja 0–1 (spada w meczu, regeneruje). */
+  condition: Double = 1.0,
+  /** Ostrość meczowa 0–1. */
+  matchSharpness: Double = 1.0
 )
 
 case class GamePlanSnapshotDto(id: String, teamId: String, name: String, createdAt: Long)
@@ -165,6 +181,17 @@ case class ScoutingReportDto(
 )
 case class CreateScoutingReportRequest(playerId: String, rating: Double, notes: String)
 
+case class ContractDto(
+  id: String,
+  playerId: String,
+  teamId: String,
+  playerName: String,
+  weeklySalary: Double,
+  startMatchday: Int,
+  endMatchday: Int,
+  releaseClause: Option[Double]
+)
+
 case class MatchDto(
   id: String,
   leagueId: String,
@@ -246,11 +273,11 @@ case class MatchSummaryDto(
   ballTortuosity: Option[Double] = None,
   /** Metabolic load (przybliżenie). */
   metabolicLoad: Option[Double] = None,
-  /** xT wartości stref 1–12. */
+  /** xT wartości stref 1–24. */
   xtByZone: Option[List[Double]] = None,
   /** Kontuzje w meczu [gospodarze, goście]. */
   injuries: Option[List[Int]] = None,
-  /** Voronoi-like: udział gospodarzy w akcjach w strefach 1–12 (EPV/dominacja). */
+  /** Voronoi-like: udział gospodarzy w akcjach w strefach 1–24 (EPV/dominacja). */
   homeShareByZone: Option[List[Double]] = None,
   /** I-VAEP: VAEP per typ zdarzenia per zawodnik (playerId -> eventType -> value). */
   vaepBreakdownByPlayer: Option[Map[String, Map[String, Double]]] = None,
@@ -260,9 +287,9 @@ case class MatchSummaryDto(
   estimatedDistanceByPlayer: Option[Map[String, Double]] = None,
   /** Player Influence: akcje per strefa per zawodnik (playerId -> zone -> count). */
   influenceByPlayer: Option[Map[String, Map[String, Int]]] = None,
-  /** C-OBSO: średnia liczba obrońców w stożku per strefa 1–12. */
+  /** C-OBSO: średnia liczba obrońców w stożku per strefa 1–24. */
   avgDefendersInConeByZone: Option[List[Double]] = None,
-  /** C-OBSO: średnia odległość GK per strefa 1–12. */
+  /** C-OBSO: średnia odległość GK per strefa 1–24. */
   avgGkDistanceByZone: Option[List[Double]] = None,
   /** Stałe fragmenty: aktywność stref per routine (np. Corner:default -> 12 liczb). */
   setPieceZoneActivity: Option[Map[String, List[Int]]] = None,
@@ -282,7 +309,7 @@ case class MatchSummaryDto(
   setPieceRoutineCluster: Option[Map[String, Int]] = None,
   /** Prognoza Poisson: [P(wygrana gosp.), P(remis), P(wygrana gości)]. */
   poissonPrognosis: Option[List[Double]] = None,
-  /** Voronoi z centrum: lista 12 (udział gosp. 0/1 per strefa). */
+  /** Voronoi z centrum: lista 24 (udział gosp. 0/1 per strefa). */
   voronoiCentroidByZone: Option[List[Double]] = None,
   /** xPass per zawodnik. */
   passValueByPlayer: Option[Map[String, Double]] = None,
@@ -293,7 +320,9 @@ case class MatchSummaryDto(
   /** xPass under pressure per zawodnik. */
   passValueUnderPressureByPlayer: Option[Map[String, Double]] = None,
   /** Influence score per zawodnik. */
-  influenceScoreByPlayer: Option[Map[String, Double]] = None
+  influenceScoreByPlayer: Option[Map[String, Double]] = None,
+  /** Najważniejsze momenty meczu (10–15). */
+  highlights: Option[List[Map[String, String]]] = None
 )
 /** Posession w czasie: udział gosp. w posiadaniu w 6 segmentach 15-min (0–15, …, 75–90). */
 case class MatchLogDto(
@@ -303,9 +332,9 @@ case class MatchLogDto(
   matchReport: Option[String] = None,
   /** Udział gospodarzy w posiadaniu per segment 15 min (6 wartości 0.0–1.0). */
   possessionBySegment: Option[List[Double]] = None,
-  /** Pressing: akcje defensywne (Tackle, PassIntercepted) gosp. per strefa 1–12. */
+  /** Pressing: akcje defensywne (Tackle, PassIntercepted) gosp. per strefa 1–24. */
   pressByZoneHome: Option[List[Int]] = None,
-  /** Pressing: akcje defensywne gości per strefa 1–12. */
+  /** Pressing: akcje defensywne gości per strefa 1–24. */
   pressByZoneAway: Option[List[Int]] = None
 )
 case class CreatePressConferenceRequest(phase: String, tone: String)
@@ -323,6 +352,8 @@ case class TransferOfferDto(
   status: String,
   createdAt: Long,
   respondedAt: Option[Long],
+  /** Kwota kontroferty (gdy status = Countered). */
+  counterAmount: Option[Double] = None,
   /** Nazwa drużyny kupującej (kto składa ofertę). */
   fromTeamName: Option[String] = None,
   /** Nazwa drużyny sprzedającej (właściciel zawodnika). */
@@ -331,14 +362,30 @@ case class TransferOfferDto(
   playerName: Option[String] = None
 )
 case class CreateTransferOfferRequest(windowId: String, toTeamId: String, playerId: String, amount: Double)
+case class CounterTransferOfferRequest(counterAmount: Double)
 
 case class SubmitMatchSquadRequest(lineup: List[LineupSlotDto], gamePlanJson: String)
-case class UpdatePlayerRequest(firstName: Option[String], lastName: Option[String])
+case class UpdatePlayerRequest(
+  firstName: Option[String] = None,
+  lastName: Option[String] = None,
+  preferredPositions: Option[List[String]] = None,
+  physical: Option[Map[String, Int]] = None,
+  technical: Option[Map[String, Int]] = None,
+  mental: Option[Map[String, Int]] = None
+)
 case class SaveGamePlanRequest(name: String, gamePlanJson: String)
 
 case class MetricsDto(matchCount: Int, totalGoals: Int, averageGoalsPerMatch: Double)
-/** Odpowiedź z radą asystenta przed meczem (formacja rywala, sugestie pressing). */
-case class AssistantTipDto(tip: String)
+/** Odpowiedź z radą asystenta przed meczem: analiza rywala + sugestie taktyczne. */
+case class AssistantTipDto(
+  tip: String,
+  opponentFormation: Option[String] = None,
+  opponentStrengths: Option[List[String]] = None,
+  opponentWeaknesses: Option[List[String]] = None,
+  tacticalSuggestions: Option[List[String]] = None,
+  keyPlayersToWatch: Option[List[String]] = None,
+  suggestedFormations: Option[List[String]] = None
+)
 /** Prognoza meczu (Elo): P(wygrana gosp.), P(remis), P(wygrana gości). */
 case class MatchPrognosisDto(
   matchId: String,

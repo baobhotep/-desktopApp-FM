@@ -43,17 +43,18 @@ object MatchSummaryAggregatorSpec extends ZIOSpecDefault {
         summary.xgTotal._2 >= 0.3
       )
     },
-    test("passes and passesInFinalThird (zone >= 9)") {
+    test("passes and passesInFinalThird (attacking third per team perspective)") {
       val events = List(
         event(5, "Pass", Some(homeId), Some(3), Some("Success"), Map()),
-        event(6, "Pass", Some(homeId), Some(10), Some("Success"), Map()),
-        event(7, "Pass", Some(awayId), Some(9), Some("Success"), Map()),
-        event(8, "LongPass", Some(awayId), Some(5), Some("Missed"), Map())
+        event(6, "Pass", Some(homeId), Some(23), Some("Success"), Map()),
+        event(7, "Pass", Some(awayId), Some(18), Some("Success"), Map()),
+        event(8, "LongPass", Some(awayId), Some(9), Some("Missed"), Map()),
+        event(9, "Pass", Some(awayId), Some(1), Some("Success"), Map())
       )
       val summary = MatchSummaryAggregator.fromEvents(events, homeId, awayId, 0, 0)
       assertTrue(
-        summary.passesTotal == (2, 2),
-        summary.passesCompleted == (2, 1),
+        summary.passesTotal == (2, 3),
+        summary.passesCompleted == (2, 2),
         summary.passesInFinalThird == (1, 1),
         summary.longBallsTotal == (0, 1),
         summary.longBallsSuccessful == (0, 0)

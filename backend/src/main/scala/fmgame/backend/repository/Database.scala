@@ -259,10 +259,37 @@ object Database {
         )
       """.update.run
 
+    val createContracts =
+      sql"""
+        CREATE TABLE IF NOT EXISTS contracts (
+          id VARCHAR(36) PRIMARY KEY,
+          player_id VARCHAR(36) NOT NULL,
+          team_id VARCHAR(36) NOT NULL,
+          weekly_salary DECIMAL(20,2) NOT NULL,
+          start_matchday INT NOT NULL,
+          end_matchday INT NOT NULL,
+          signing_bonus DECIMAL(20,2) NOT NULL DEFAULT 0,
+          release_clause DECIMAL(20,2),
+          created_at TIMESTAMP NOT NULL,
+          FOREIGN KEY (player_id) REFERENCES players(id),
+          FOREIGN KEY (team_id) REFERENCES teams(id)
+        )
+      """.update.run
+
     val addEloColumn =
       sql"ALTER TABLE teams ADD COLUMN elo_rating DOUBLE DEFAULT 1500 NOT NULL".update.run
     val addManagerNameColumn =
       sql"ALTER TABLE teams ADD COLUMN manager_name VARCHAR(255)".update.run
+    val addCounterAmountColumn =
+      sql"ALTER TABLE transfer_offers ADD COLUMN counter_amount DECIMAL(20,2)".update.run
+    val addLeagueSystemName =
+      sql"ALTER TABLE leagues ADD COLUMN league_system_name VARCHAR(64)".update.run
+    val addLeagueTier =
+      sql"ALTER TABLE leagues ADD COLUMN tier INT".update.run
+    val addPlayerCondition =
+      sql"ALTER TABLE players ADD COLUMN condition DOUBLE DEFAULT 1.0".update.run
+    val addPlayerMatchSharpness =
+      sql"ALTER TABLE players ADD COLUMN match_sharpness DOUBLE DEFAULT 1.0".update.run
 
     val steps = for {
       _ <- createUsers
@@ -282,8 +309,30 @@ object Database {
       _ <- createTeamShortlists
       _ <- createScoutingReports
       _ <- createLeaguePlayerMatchStats
+      _ <- createContracts
     } yield ()
 
-    (steps.transact(xa) *> addEloColumn.transact(xa).unit *> addManagerNameColumn.transact(xa).unit).catchAll(_ => ZIO.unit)
+    val createIndexes = for {
+      _ <- sql"CREATE INDEX IF NOT EXISTS idx_teams_league ON teams(league_id)".update.run
+      _ <- sql"CREATE INDEX IF NOT EXISTS idx_teams_owner ON teams(owner_user_id)".update.run
+      _ <- sql"CREATE INDEX IF NOT EXISTS idx_players_team ON players(team_id)".update.run
+      _ <- sql"CREATE INDEX IF NOT EXISTS idx_matches_league ON matches(league_id)".update.run
+      _ <- sql"CREATE INDEX IF NOT EXISTS idx_matches_league_md ON matches(league_id, matchday)".update.run
+      _ <- sql"CREATE INDEX IF NOT EXISTS idx_invitations_user ON invitations(invited_user_id, status)".update.run
+      _ <- sql"CREATE INDEX IF NOT EXISTS idx_offers_window ON transfer_offers(window_id)".update.run
+      _ <- sql"CREATE INDEX IF NOT EXISTS idx_offers_player ON transfer_offers(player_id, window_id, status)".update.run
+      _ <- sql"CREATE INDEX IF NOT EXISTS idx_lpms_league ON league_player_match_stats(league_id)".update.run
+      _ <- sql"CREATE INDEX IF NOT EXISTS idx_contracts_team ON contracts(team_id)".update.run
+    } yield ()
+
+    steps.transact(xa) *>
+      addEloColumn.transact(xa).unit.catchAll(e => ZIO.logDebug(s"ALTER TABLE (elo_rating): ${e.getMessage}")) *>
+      addManagerNameColumn.transact(xa).unit.catchAll(e => ZIO.logDebug(s"ALTER TABLE (manager_name): ${e.getMessage}")) *>
+      addCounterAmountColumn.transact(xa).unit.catchAll(e => ZIO.logDebug(s"ALTER TABLE (counter_amount): ${e.getMessage}")) *>
+      addLeagueSystemName.transact(xa).unit.catchAll(e => ZIO.logDebug(s"ALTER TABLE (league_system_name): ${e.getMessage}")) *>
+      addLeagueTier.transact(xa).unit.catchAll(e => ZIO.logDebug(s"ALTER TABLE (tier): ${e.getMessage}")) *>
+      addPlayerCondition.transact(xa).unit.catchAll(e => ZIO.logDebug(s"ALTER TABLE (condition): ${e.getMessage}")) *>
+      addPlayerMatchSharpness.transact(xa).unit.catchAll(e => ZIO.logDebug(s"ALTER TABLE (match_sharpness): ${e.getMessage}")) *>
+      createIndexes.transact(xa).unit.catchAll(e => ZIO.logDebug(s"CREATE INDEX: ${e.getMessage}"))
   }
 }

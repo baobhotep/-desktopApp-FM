@@ -11,6 +11,8 @@ trait LeaguePlayerMatchStatsRepository {
   def insertForMatch(leagueId: LeagueId, matchId: MatchId, rows: List[(PlayerId, TeamId, Int, Int, Int)]): ConnectionIO[Unit]
   /** Sumuje gole i asysty per (player_id, team_id) w lidze. Zwraca (playerId, teamId, goals, assists). */
   def sumByLeague(leagueId: LeagueId): ConnectionIO[List[(PlayerId, TeamId, Int, Int)]]
+  /** Usuwa wszystkie wpisy dla ligi (przed startem nowego sezonu). */
+  def deleteByLeague(leagueId: LeagueId): ConnectionIO[Unit]
 }
 
 object LeaguePlayerMatchStatsRepository {
@@ -34,5 +36,8 @@ object LeaguePlayerMatchStatsRepository {
       """.query[(String, String, Int, Int)].to[List].map(_.map { case (pid, tid, g, a) =>
         (PlayerId(pid), TeamId(tid), g, a)
       })
+
+    override def deleteByLeague(leagueId: LeagueId): ConnectionIO[Unit] =
+      sql"DELETE FROM league_player_match_stats WHERE league_id = ${leagueId.value}".update.run.map(_ => ())
   }
 }

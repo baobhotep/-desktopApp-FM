@@ -4,7 +4,7 @@ import fmgame.shared.api._
 import com.raquo.laminar.api.L.*
 
 object RegisterPage {
-  def render(showLogin: Var[Boolean]): Element = {
+  def render: Element = {
     val email = Var("")
     val password = Var("")
     val displayName = Var("")
@@ -12,13 +12,19 @@ object RegisterPage {
     val busy = Var(false)
 
     def doRegister(): Unit = {
+      val e = email.now().trim
+      val p = password.now()
+      val dn = displayName.now().trim
+      if (e.isEmpty || !e.contains("@")) { error.set(Some("Podaj poprawny adres e-mail")); return }
+      if (p.length < 8 || !p.exists(_.isLetter) || !p.exists(_.isDigit)) { error.set(Some("Hasło musi mieć min. 8 znaków, zawierać literę i cyfrę")); return }
+      if (dn.isEmpty) { error.set(Some("Podaj nazwę użytkownika")); return }
       error.set(None)
       busy.set(true)
-      App.runZio(ApiClient.register(RegisterRequest(email.now(), password.now(), displayName.now()))) {
+      App.runZio(ApiClient.register(RegisterRequest(e, p, dn))) {
         case Right(_) =>
           error.set(None)
           busy.set(false)
-          showLogin.set(true)
+          AppState.currentPage.set(Page.Login)
         case Left(msg) =>
           error.set(Some(msg))
           busy.set(false)
@@ -77,7 +83,7 @@ object RegisterPage {
       button(
         cls := "w-full mt-2 py-2 text-blue-600 dark:text-blue-400",
         "Back to login",
-        onClick --> { _ => showLogin.set(true) }
+        onClick --> { _ => AppState.currentPage.set(Page.Login) }
       )
     )
   }

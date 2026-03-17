@@ -10,6 +10,8 @@ trait TransferWindowRepository {
   def create(tw: TransferWindow): ConnectionIO[Unit]
   def update(tw: TransferWindow): ConnectionIO[Unit]
   def listByLeague(leagueId: LeagueId): ConnectionIO[List[TransferWindow]]
+  /** Usuwa okna transferowe ligi (wywołać po usunięciu ofert). */
+  def deleteByLeague(leagueId: LeagueId): ConnectionIO[Unit]
 }
 
 object TransferWindowRepository {
@@ -38,5 +40,8 @@ object TransferWindowRepository {
           )
         }
       }
+
+    def deleteByLeague(leagueId: LeagueId): ConnectionIO[Unit] =
+      sql"DELETE FROM transfer_windows WHERE league_id = ${leagueId.value}".update.run.map(_ => ())
   }
 }

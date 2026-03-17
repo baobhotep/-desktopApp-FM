@@ -23,7 +23,7 @@ object AcceptInvitationPage {
           case Right(res) =>
             success.set(Some(s"Dołączyłeś do ligi ${res.league.name} jako ${res.team.name}"))
             AppState.invitationToken.set(None)
-            AppState.selectedLeagueId.set(Some(res.league.id))
+            AppState.currentPage.set(Page.LeagueView(res.league.id))
             busy.set(false)
           case Left(m) =>
             error.set(Some(m))

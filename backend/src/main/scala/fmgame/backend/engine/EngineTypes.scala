@@ -8,7 +8,9 @@ import fmgame.shared.domain.*
 /** Strefy w których drużyna włącza pressing; strefa kontrataku (odzyskanie piłki). Zaawansowana logika botów. */
 case class TriggerConfig(
   pressZones: List[Int] = Nil,
-  counterTriggerZone: Option[Int] = None
+  counterTriggerZone: Option[Int] = None,
+  /** Obrona stałych fragmentów: "zonal" (-15% xG rogu), "man" (-10% xG, +5% faul), "mixed"/None = bez zmian. */
+  setPieceDefense: Option[String] = None
 )
 
 /** Instrukcje drużynowe (FM-style: tempo, szerokość, podania, pressing). */
@@ -58,7 +60,11 @@ case class GamePlanInput(
   /** Stałe fragmenty: wykonawcy rogów/wolnych/karnych; routine (corner/freeKick) wpływa na xG następnego strzału. */
   setPieces: Option[SetPiecesInput] = None,
   /** Instrukcje na rywala (MVP). */
-  oppositionInstructions: Option[List[OppositionInstruction]] = None
+  oppositionInstructions: Option[List[OppositionInstruction]] = None,
+  /** Formacja w obronie (bez piłki). Gdy brak – silnik używa formacji ataku. */
+  defenseFormationName: Option[String] = None,
+  /** Pozycje 11 slotów w obronie (x,y 0–1). */
+  defenseCustomPositions: Option[List[(Double, Double)]] = None
 )
 
 case class MatchTeamInput(
